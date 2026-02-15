@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"go-trade/internal/app"
 	"go-trade/internal/config"
-	"go-trade/internal/logging"
 )
 
 func main() {
@@ -20,20 +20,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	log, err := logging.Build(cfg.App.LogLevel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+	a := app.New(cfg)
+	if err := a.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
 	}
-	defer log.Sync()
-
-	log.Info("HAYALET trading daemon starting",
-		// zap.String("env", cfg.App.Env),
-		// zap.String("apiAddress", cfg.API.ListenAddress),
-	)
-
-	// TODO: Initialize bridge, engine, API server, and run main loop
-	// This will be implemented in Phase 1-4
-	fmt.Println("HAYALET daemon v0.1.0 - skeleton ready")
-	fmt.Printf("Config loaded: env=%s, api=%s\n", cfg.App.Env, cfg.API.ListenAddress)
 }
