@@ -43,9 +43,10 @@ func OpenSharedMemory(name string, tickCap, posCap, cmdCap, acctCap uint32) (*Sh
 		0, uint32(totalSize),
 		namePtr,
 	)
-	if err != nil {
+	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		return nil, fmt.Errorf("creating file mapping %q: %w", name, err)
 	}
+	alreadyExists := errors.Is(err, windows.ERROR_ALREADY_EXISTS)
 
 	view, err := windows.MapViewOfFile(
 		handle,
@@ -72,12 +73,34 @@ func OpenSharedMemory(name string, tickCap, posCap, cmdCap, acctCap uint32) (*Sh
 		return nil, errors.New("incompatible SHM version")
 	}
 
+	// Initialize header if this is a fresh mapping
+	if hdr.Version == 0 && !alreadyExists {
+		hdr.Version = shmVersion
+		hdr.TickCapacity = tickCap
+		hdr.PositionCapacity = posCap
+		hdr.CommandCapacity = cmdCap
+		hdr.AccountCapacity = acctCap
+		if err := memWrite(headerAddr, unsafe.Pointer(&hdr), headerSize()); err != nil {
+			_ = windows.UnmapViewOfFile(view)
+			_ = windows.CloseHandle(handle)
+			return nil, fmt.Errorf("writing SHM header: %w", err)
+		}
+	}
+
+	// Use capacities from header if mapping already existed
+	if alreadyExists && hdr.TickCapacity > 0 {
+		tickCap = hdr.TickCapacity
+		posCap = hdr.PositionCapacity
+		cmdCap = hdr.CommandCapacity
+		acctCap = hdr.AccountCapacity
+	}
+
 	// Calculate ring buffer base addresses
 	base := view + headerSize()
 	ticksAddr := base
-	posesAddr := ticksAddr + uintptr(hdr.TickCapacity)*tickSize()
-	cmdsAddr := posesAddr + uintptr(hdr.PositionCapacity)*posSize()
-	acctsAddr := cmdsAddr + uintptr(hdr.CommandCapacity)*cmdSize()
+	posesAddr := ticksAddr + uintptr(tickCap)*tickSize()
+	cmdsAddr := posesAddr + uintptr(posCap)*posSize()
+	acctsAddr := cmdsAddr + uintptr(cmdCap)*cmdSize()
 
 	return &SharedMemory{
 		handle: handle,

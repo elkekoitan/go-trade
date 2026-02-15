@@ -18,353 +18,247 @@ int  HB_Close();
 #import
 
 // ── Inputs ──
-input string InpShmName       = "HayaletSHM";   // Shared memory name
-input uint   InpTickCapacity   = 4096;            // Tick ring buffer capacity
-input uint   InpPosCapacity    = 1024;            // Position ring buffer capacity
-input uint   InpCmdCapacity    = 512;             // Command ring buffer capacity
-input uint   InpAcctCapacity   = 64;              // Account ring buffer capacity
-input int    InpHeartbeatMs    = 1000;            // Heartbeat interval (ms)
-input int    InpMagicStart     = 1000;            // Magic number range start
-input int    InpMagicEnd       = 6999;            // Magic number range end
-input string InpSymbols        = "";              // Symbols (empty = chart symbol only)
+input string InpShmName       = "HAYALET_SHM";   // Shared memory name
+input uint   InpTickCapacity   = 4096;             // Tick ring buffer capacity
+input uint   InpPosCapacity    = 1024;             // Position ring buffer capacity
+input uint   InpCmdCapacity    = 512;              // Command ring buffer capacity
+input uint   InpAcctCapacity   = 64;               // Account ring buffer capacity
+input int    InpHeartbeatMs    = 1000;             // Heartbeat interval (ms)
+input int    InpMagicStart     = 1000;             // Magic number range start
+input int    InpMagicEnd       = 6999;             // Magic number range end
+input string InpSymbols        = "";               // Symbols (empty = chart symbol only)
 
-// ── Constants matching Go struct sizes ──
-#define SYMBOL_SIZE    16
-#define ACCOUNT_SIZE   16
-#define REASON_SIZE    32
-#define TICK_SIZE      40
-#define POSITION_SIZE  80  // without padding: 8+16+4+4+8+8+8+4+16 = 76, aligned to 80
-#define COMMAND_SIZE   104
-#define ACCOUNT_ST_SIZE 48 // 16+8+8+8+8 = 48
+// ── Struct sizes matching Go/C++ layout ──
+#define SYMBOL_SIZE     16
+#define ACCOUNT_SIZE    16
+#define REASON_SIZE     32
+#define TICK_BYTES      40
+#define POSITION_BYTES  76
+#define COMMAND_BYTES   104
+#define ACCOUNT_BYTES   48
+
+// ── Structs for StructToCharArray / CharArrayToStruct ──
+struct ShmTick
+{
+   uchar  Symbol[SYMBOL_SIZE]; // 16
+   double Bid;                 // 8
+   double Ask;                 // 8
+   long   TimeNs;              // 8 = 40 total
+};
+
+struct ShmPosition
+{
+   long   ID;                     // 8
+   uchar  Symbol[SYMBOL_SIZE];    // 16
+   int    Side;                   // 4
+   int    Type;                   // 4
+   double Volume;                 // 8
+   double Price;                  // 8
+   long   TimeNs;                 // 8
+   int    Magic;                  // 4
+   uchar  Account[ACCOUNT_SIZE];  // 16 = 76 total
+};
+
+struct ShmCommand
+{
+   int    Type;                   // 4
+   uchar  Symbol[SYMBOL_SIZE];    // 16
+   int    Side;                   // 4
+   double Volume;                 // 8
+   double Price;                  // 8
+   double TP;                     // 8
+   double SL;                     // 8
+   long   Ticket;                 // 8
+   int    Magic;                  // 4
+   uchar  Account[ACCOUNT_SIZE];  // 16
+   uchar  Reason[REASON_SIZE];    // 32 = 104 total... but check padding
+   long   TimeNs;                 // 8
+};
+
+struct ShmAccount
+{
+   uchar  Account[ACCOUNT_SIZE];  // 16
+   double Balance;                // 8
+   double Equity;                 // 8
+   double Margin;                 // 8
+   long   TimeNs;                 // 8 = 48 total
+};
 
 // ── Globals ──
-bool g_initialized = false;
+bool     g_initialized = false;
 datetime g_lastHeartbeat = 0;
-string g_symbols[];
+string   g_symbols[];
 
 //+------------------------------------------------------------------+
-//| Pack a tick into byte array matching ShmTick layout               |
+//| Helper: copy string into fixed-size uchar array                   |
 //+------------------------------------------------------------------+
-void PackTick(uchar &buf[], string symbol, double bid, double ask)
+void StringToFixedBytes(const string s, uchar &dest[], int size)
 {
-   ArrayResize(buf, TICK_SIZE);
-   ArrayInitialize(buf, 0);
-
-   // Symbol[16]
-   uchar symBytes[];
-   StringToCharArray(symbol, symBytes, 0, SYMBOL_SIZE);
-   ArrayCopy(buf, symBytes, 0, 0, MathMin(ArraySize(symBytes), SYMBOL_SIZE));
-
-   // Bid (double, offset 16)
-   uchar bidBytes[8];
-   DoubleToBytes(bid, bidBytes);
-   ArrayCopy(buf, bidBytes, 16, 0, 8);
-
-   // Ask (double, offset 24)
-   uchar askBytes[8];
-   DoubleToBytes(ask, askBytes);
-   ArrayCopy(buf, askBytes, 24, 0, 8);
-
-   // TimeNs (int64, offset 32)
-   long timeNs = (long)TimeCurrent() * 1000000000LL;
-   uchar timeBytes[8];
-   LongToBytes(timeNs, timeBytes);
-   ArrayCopy(buf, timeBytes, 32, 0, 8);
+   ArrayInitialize(dest, 0);
+   uchar tmp[];
+   int len = StringToCharArray(s, tmp, 0, -1, CP_ACP);
+   int copyLen = MathMin(len, size);
+   for(int i = 0; i < copyLen && i < ArraySize(tmp); i++)
+      dest[i] = tmp[i];
 }
 
 //+------------------------------------------------------------------+
-//| Pack a position into byte array matching ShmPosition layout       |
+//| Helper: extract string from fixed-size uchar array                |
 //+------------------------------------------------------------------+
-void PackPosition(uchar &buf[], ulong ticket)
+string FixedBytesToString(const uchar &src[], int size)
 {
-   ArrayResize(buf, POSITION_SIZE);
-   ArrayInitialize(buf, 0);
+   // Find null terminator
+   int len = 0;
+   for(int i = 0; i < size; i++)
+   {
+      if(src[i] == 0) break;
+      len++;
+   }
+   if(len == 0) return "";
+   uchar tmp[];
+   ArrayResize(tmp, len);
+   ArrayCopy(tmp, src, 0, 0, len);
+   return CharArrayToString(tmp, 0, -1, CP_ACP);
+}
 
+//+------------------------------------------------------------------+
+//| Pack and send tick                                                |
+//+------------------------------------------------------------------+
+void SendTick(string symbol, double bid, double ask)
+{
+   ShmTick tick;
+   ZeroMemory(tick);
+   StringToFixedBytes(symbol, tick.Symbol, SYMBOL_SIZE);
+   tick.Bid = bid;
+   tick.Ask = ask;
+   tick.TimeNs = (long)TimeCurrent() * 1000000000;
+
+   uchar buf[];
+   StructToCharArray(tick, buf);
+   HB_SendTick(buf);
+}
+
+//+------------------------------------------------------------------+
+//| Pack and send position                                            |
+//+------------------------------------------------------------------+
+void SendPosition(ulong ticket)
+{
    if(!PositionSelectByTicket(ticket))
       return;
 
-   string symbol = PositionGetString(POSITION_SYMBOL);
-   long magic = PositionGetInteger(POSITION_MAGIC);
-   double volume = PositionGetDouble(POSITION_VOLUME);
-   double price = PositionGetDouble(POSITION_PRICE_OPEN);
+   ShmPosition pos;
+   ZeroMemory(pos);
+
+   pos.ID = (long)ticket;
+   StringToFixedBytes(PositionGetString(POSITION_SYMBOL), pos.Symbol, SYMBOL_SIZE);
+
    long posType = PositionGetInteger(POSITION_TYPE);
-   datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+   pos.Side = (posType == POSITION_TYPE_BUY) ? 1 : -1;
+   pos.Type = 0; // market
+   pos.Volume = PositionGetDouble(POSITION_VOLUME);
+   pos.Price = PositionGetDouble(POSITION_PRICE_OPEN);
+   pos.TimeNs = (long)PositionGetInteger(POSITION_TIME) * 1000000000;
+   pos.Magic = (int)PositionGetInteger(POSITION_MAGIC);
+   StringToFixedBytes(IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)), pos.Account, ACCOUNT_SIZE);
 
-   int side = (posType == POSITION_TYPE_BUY) ? 1 : -1;
-   int type = 0; // market order
-
-   // ID (int64, offset 0)
-   long id = (long)ticket;
-   uchar idBytes[8];
-   LongToBytes(id, idBytes);
-   ArrayCopy(buf, idBytes, 0, 0, 8);
-
-   // Symbol[16] (offset 8)
-   uchar symBytes[];
-   StringToCharArray(symbol, symBytes, 0, SYMBOL_SIZE);
-   ArrayCopy(buf, symBytes, 8, 0, MathMin(ArraySize(symBytes), SYMBOL_SIZE));
-
-   // Side (int32, offset 24)
-   uchar sideBytes[4];
-   IntToBytes(side, sideBytes);
-   ArrayCopy(buf, sideBytes, 24, 0, 4);
-
-   // Type (int32, offset 28)
-   uchar typeBytes[4];
-   IntToBytes(type, typeBytes);
-   ArrayCopy(buf, typeBytes, 28, 0, 4);
-
-   // Volume (double, offset 32)
-   uchar volBytes[8];
-   DoubleToBytes(volume, volBytes);
-   ArrayCopy(buf, volBytes, 32, 0, 8);
-
-   // Price (double, offset 40)
-   uchar priceBytes[8];
-   DoubleToBytes(price, priceBytes);
-   ArrayCopy(buf, priceBytes, 40, 0, 8);
-
-   // TimeNs (int64, offset 48)
-   long timeNs = (long)openTime * 1000000000LL;
-   uchar timeBytes[8];
-   LongToBytes(timeNs, timeBytes);
-   ArrayCopy(buf, timeBytes, 48, 0, 8);
-
-   // Magic (int32, offset 56)
-   uchar magicBytes[4];
-   IntToBytes((int)magic, magicBytes);
-   ArrayCopy(buf, magicBytes, 56, 0, 4);
-
-   // Account[16] (offset 60)
-   string acctId = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
-   uchar acctBytes[];
-   StringToCharArray(acctId, acctBytes, 0, ACCOUNT_SIZE);
-   ArrayCopy(buf, acctBytes, 60, 0, MathMin(ArraySize(acctBytes), ACCOUNT_SIZE));
+   uchar buf[];
+   StructToCharArray(pos, buf);
+   HB_SendPosition(buf);
 }
 
 //+------------------------------------------------------------------+
-//| Pack account state into byte array matching ShmAccount layout     |
+//| Pack and send account state                                       |
 //+------------------------------------------------------------------+
-void PackAccount(uchar &buf[])
+void SendAccount()
 {
-   ArrayResize(buf, ACCOUNT_ST_SIZE);
-   ArrayInitialize(buf, 0);
+   ShmAccount acct;
+   ZeroMemory(acct);
 
-   string acctId = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double margin = AccountInfoDouble(ACCOUNT_MARGIN);
+   StringToFixedBytes(IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)), acct.Account, ACCOUNT_SIZE);
+   acct.Balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   acct.Equity  = AccountInfoDouble(ACCOUNT_EQUITY);
+   acct.Margin  = AccountInfoDouble(ACCOUNT_MARGIN);
+   acct.TimeNs  = (long)TimeCurrent() * 1000000000;
 
-   // Account[16] (offset 0)
-   uchar acctBytes[];
-   StringToCharArray(acctId, acctBytes, 0, ACCOUNT_SIZE);
-   ArrayCopy(buf, acctBytes, 0, 0, MathMin(ArraySize(acctBytes), ACCOUNT_SIZE));
-
-   // Balance (double, offset 16)
-   uchar balBytes[8];
-   DoubleToBytes(balance, balBytes);
-   ArrayCopy(buf, balBytes, 16, 0, 8);
-
-   // Equity (double, offset 24)
-   uchar eqBytes[8];
-   DoubleToBytes(equity, eqBytes);
-   ArrayCopy(buf, eqBytes, 24, 0, 8);
-
-   // Margin (double, offset 32)
-   uchar marBytes[8];
-   DoubleToBytes(margin, marBytes);
-   ArrayCopy(buf, marBytes, 32, 0, 8);
-
-   // TimeNs (int64, offset 40)
-   long timeNs = (long)TimeCurrent() * 1000000000LL;
-   uchar timeBytes[8];
-   LongToBytes(timeNs, timeBytes);
-   ArrayCopy(buf, timeBytes, 40, 0, 8);
+   uchar buf[];
+   StructToCharArray(acct, buf);
+   HB_SendAccount(buf);
 }
 
 //+------------------------------------------------------------------+
-//| Byte packing helpers                                              |
+//| Process a command from Go engine                                  |
 //+------------------------------------------------------------------+
-void DoubleToBytes(double value, uchar &bytes[])
+void ProcessCommand(ShmCommand &cmd)
 {
-   ArrayResize(bytes, 8);
-   union { double d; uchar b[8]; } u;
-   // MQL5 workaround: use struct copy
-   long bits = 0;
-   // Direct memory layout
-   uchar temp[];
-   if(StringToCharArray(DoubleToString(value, 20), temp) > 0) {}
-   // Use MathSwap workaround
-   ArrayResize(bytes, 8);
-   // Direct approach: copy double bytes
-   struct DoubleBytes { double val; };
-   struct RawBytes { uchar b[8]; };
-   DoubleBytes db;
-   db.val = value;
-   RawBytes rb;
-   // MQL5 struct copy preserves memory layout
-   ArrayInitialize(bytes, 0);
-   // Use the MQL5 built-in approach
-   long longVal = 0;
-   // Reinterpret double as long
-   struct DL { double d; };
-   struct LL { long l; };
-   DL dl; dl.d = value;
-   // In MQL5, we need to use StructToCharArray or similar
-   MqlRates rates[];
-   // Simplest reliable approach in MQL5:
-   ArrayResize(bytes, 8);
-   ResetLastError();
-   // MQL5 has no direct double-to-bytes, use FileWriteDouble trick
-   // Alternative: bit manipulation is needed
-   // Since MQL5 lacks union/reinterpret_cast, use global variable trick
-   string filename = "hayalet_tmp.bin";
-   int handle = FileOpen(filename, FILE_WRITE|FILE_BIN);
-   if(handle != INVALID_HANDLE)
-   {
-      FileWriteDouble(handle, value);
-      FileClose(handle);
-      handle = FileOpen(filename, FILE_READ|FILE_BIN);
-      if(handle != INVALID_HANDLE)
-      {
-         FileReadArray(handle, bytes, 0, 8);
-         FileClose(handle);
-      }
-      FileDelete(filename);
-   }
-}
-
-void LongToBytes(long value, uchar &bytes[])
-{
-   ArrayResize(bytes, 8);
-   for(int i = 0; i < 8; i++)
-      bytes[i] = (uchar)((value >> (i * 8)) & 0xFF);
-}
-
-void IntToBytes(int value, uchar &bytes[])
-{
-   ArrayResize(bytes, 4);
-   for(int i = 0; i < 4; i++)
-      bytes[i] = (uchar)((value >> (i * 8)) & 0xFF);
-}
-
-//+------------------------------------------------------------------+
-//| Parse command and execute trade                                   |
-//+------------------------------------------------------------------+
-void ExecuteCommand(uchar &cmdBuf[])
-{
-   // Unpack command fields
-   int cmdType = BytesToInt(cmdBuf, 0);
-   string symbol = CharArrayToString(cmdBuf, 4, SYMBOL_SIZE);
-   // Trim null bytes
-   int nullPos = StringFind(symbol, "\x00");
-   if(nullPos >= 0) symbol = StringSubstr(symbol, 0, nullPos);
-
-   int side = BytesToInt(cmdBuf, 20);
-   double volume = BytesToDouble(cmdBuf, 24);
-   double price = BytesToDouble(cmdBuf, 32);
-   double tp = BytesToDouble(cmdBuf, 40);
-   double sl = BytesToDouble(cmdBuf, 48);
-   long ticket = BytesToLong(cmdBuf, 56);
-   int magic = BytesToInt(cmdBuf, 64);
-   string reason = CharArrayToString(cmdBuf, 84, REASON_SIZE);
+   string symbol = FixedBytesToString(cmd.Symbol, SYMBOL_SIZE);
+   string reason = FixedBytesToString(cmd.Reason, REASON_SIZE);
 
    MqlTradeRequest request = {};
-   MqlTradeResult result = {};
+   MqlTradeResult  result  = {};
 
-   switch(cmdType)
+   switch(cmd.Type)
    {
       case 1: // OPEN
-         request.action = TRADE_ACTION_DEAL;
-         request.symbol = symbol;
-         request.volume = volume;
-         request.type = (side > 0) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-         request.price = (side > 0) ? SymbolInfoDouble(symbol, SYMBOL_ASK) : SymbolInfoDouble(symbol, SYMBOL_BID);
-         if(tp > 0) request.tp = tp;
-         if(sl > 0) request.sl = sl;
-         request.magic = magic;
-         request.deviation = 20;
+         request.action       = TRADE_ACTION_DEAL;
+         request.symbol       = symbol;
+         request.volume       = cmd.Volume;
+         request.type         = (cmd.Side > 0) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+         request.price        = (cmd.Side > 0) ? SymbolInfoDouble(symbol, SYMBOL_ASK)
+                                               : SymbolInfoDouble(symbol, SYMBOL_BID);
+         if(cmd.TP > 0) request.tp = cmd.TP;
+         if(cmd.SL > 0) request.sl = cmd.SL;
+         request.magic        = cmd.Magic;
+         request.deviation    = 20;
          request.type_filling = ORDER_FILLING_IOC;
+
          if(!OrderSend(request, result))
-            PrintFormat("[HAYALET] OPEN failed: %s vol=%.2f err=%d", symbol, volume, GetLastError());
+            PrintFormat("[HAYALET] OPEN fail: %s vol=%.2f err=%d", symbol, cmd.Volume, GetLastError());
          else
-            PrintFormat("[HAYALET] OPEN ok: %s vol=%.2f ticket=%lld reason=%s", symbol, volume, result.order, reason);
+            PrintFormat("[HAYALET] OPEN ok: %s vol=%.2f ticket=%I64d reason=%s", symbol, cmd.Volume, result.order, reason);
          break;
 
       case 2: // CLOSE
-         if(ticket > 0 && PositionSelectByTicket((ulong)ticket))
+         if(cmd.Ticket > 0 && PositionSelectByTicket((ulong)cmd.Ticket))
          {
-            request.action = TRADE_ACTION_DEAL;
-            request.position = (ulong)ticket;
-            request.symbol = PositionGetString(POSITION_SYMBOL);
-            request.volume = (volume > 0) ? volume : PositionGetDouble(POSITION_VOLUME);
-            long posType = PositionGetInteger(POSITION_TYPE);
-            request.type = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-            request.price = (posType == POSITION_TYPE_BUY) ?
-               SymbolInfoDouble(request.symbol, SYMBOL_BID) :
-               SymbolInfoDouble(request.symbol, SYMBOL_ASK);
-            request.deviation = 20;
+            request.action       = TRADE_ACTION_DEAL;
+            request.position     = (ulong)cmd.Ticket;
+            request.symbol       = PositionGetString(POSITION_SYMBOL);
+            request.volume       = (cmd.Volume > 0) ? cmd.Volume : PositionGetDouble(POSITION_VOLUME);
+            long posType         = PositionGetInteger(POSITION_TYPE);
+            request.type         = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+            request.price        = (posType == POSITION_TYPE_BUY)
+                                   ? SymbolInfoDouble(request.symbol, SYMBOL_BID)
+                                   : SymbolInfoDouble(request.symbol, SYMBOL_ASK);
+            request.deviation    = 20;
             request.type_filling = ORDER_FILLING_IOC;
+
             if(!OrderSend(request, result))
-               PrintFormat("[HAYALET] CLOSE failed: ticket=%lld err=%d", ticket, GetLastError());
+               PrintFormat("[HAYALET] CLOSE fail: ticket=%I64d err=%d", cmd.Ticket, GetLastError());
             else
-               PrintFormat("[HAYALET] CLOSE ok: ticket=%lld reason=%s", ticket, reason);
+               PrintFormat("[HAYALET] CLOSE ok: ticket=%I64d reason=%s", cmd.Ticket, reason);
          }
          break;
 
       case 3: // MODIFY
-         if(ticket > 0 && PositionSelectByTicket((ulong)ticket))
+         if(cmd.Ticket > 0 && PositionSelectByTicket((ulong)cmd.Ticket))
          {
-            request.action = TRADE_ACTION_SLTP;
-            request.position = (ulong)ticket;
-            request.symbol = PositionGetString(POSITION_SYMBOL);
-            if(tp > 0) request.tp = tp;
-            if(sl > 0) request.sl = sl;
+            request.action   = TRADE_ACTION_SLTP;
+            request.position = (ulong)cmd.Ticket;
+            request.symbol   = PositionGetString(POSITION_SYMBOL);
+            if(cmd.TP > 0) request.tp = cmd.TP;
+            if(cmd.SL > 0) request.sl = cmd.SL;
+
             if(!OrderSend(request, result))
-               PrintFormat("[HAYALET] MODIFY failed: ticket=%lld err=%d", ticket, GetLastError());
+               PrintFormat("[HAYALET] MODIFY fail: ticket=%I64d err=%d", cmd.Ticket, GetLastError());
             else
-               PrintFormat("[HAYALET] MODIFY ok: ticket=%lld tp=%.5f sl=%.5f", ticket, tp, sl);
+               PrintFormat("[HAYALET] MODIFY ok: ticket=%I64d tp=%.5f sl=%.5f", cmd.Ticket, cmd.TP, cmd.SL);
          }
          break;
 
       default:
-         PrintFormat("[HAYALET] Unknown command type: %d", cmdType);
+         PrintFormat("[HAYALET] Unknown cmd type: %d", cmd.Type);
          break;
    }
-}
-
-double BytesToDouble(const uchar &buf[], int offset)
-{
-   uchar temp[8];
-   ArrayCopy(temp, buf, 0, offset, 8);
-   // Use file trick to convert bytes back to double
-   string filename = "hayalet_tmp2.bin";
-   int handle = FileOpen(filename, FILE_WRITE|FILE_BIN);
-   if(handle == INVALID_HANDLE) return 0;
-   FileWriteArray(handle, temp, 0, 8);
-   FileClose(handle);
-   handle = FileOpen(filename, FILE_READ|FILE_BIN);
-   if(handle == INVALID_HANDLE) return 0;
-   double val = FileReadDouble(handle);
-   FileClose(handle);
-   FileDelete(filename);
-   return val;
-}
-
-long BytesToLong(const uchar &buf[], int offset)
-{
-   long val = 0;
-   for(int i = 0; i < 8; i++)
-      val |= ((long)buf[offset + i]) << (i * 8);
-   return val;
-}
-
-int BytesToInt(const uchar &buf[], int offset)
-{
-   int val = 0;
-   for(int i = 0; i < 4; i++)
-      val |= ((int)buf[offset + i]) << (i * 8);
-   return val;
 }
 
 //+------------------------------------------------------------------+
@@ -406,7 +300,7 @@ int OnInit()
    PrintFormat("[HAYALET] Bridge initialized: %s | symbols=%d | tick=%d pos=%d cmd=%d acct=%d",
       InpShmName, ArraySize(g_symbols), InpTickCapacity, InpPosCapacity, InpCmdCapacity, InpAcctCapacity);
 
-   EventSetMillisecondTimer(50); // 50ms processing loop
+   EventSetMillisecondTimer(50);
    return INIT_SUCCEEDED;
 }
 
@@ -425,20 +319,16 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Tick handler — send tick data to Go                               |
+//| Tick handler — send tick data to Go on every price change         |
 //+------------------------------------------------------------------+
 void OnTick()
 {
    if(!g_initialized) return;
-
-   // Send tick for chart symbol
-   uchar tickBuf[];
-   PackTick(tickBuf, Symbol(), SymbolInfoDouble(Symbol(), SYMBOL_BID), SymbolInfoDouble(Symbol(), SYMBOL_ASK));
-   HB_SendTick(tickBuf);
+   SendTick(Symbol(), SymbolInfoDouble(Symbol(), SYMBOL_BID), SymbolInfoDouble(Symbol(), SYMBOL_ASK));
 }
 
 //+------------------------------------------------------------------+
-//| Timer handler — main processing loop                              |
+//| Timer handler — main 50ms processing loop                        |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -447,15 +337,10 @@ void OnTimer()
    // ── Send ticks for all watched symbols ──
    for(int i = 0; i < ArraySize(g_symbols); i++)
    {
-      string sym = g_symbols[i];
-      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
-      double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(g_symbols[i], SYMBOL_BID);
+      double ask = SymbolInfoDouble(g_symbols[i], SYMBOL_ASK);
       if(bid > 0 && ask > 0)
-      {
-         uchar tickBuf[];
-         PackTick(tickBuf, sym, bid, ask);
-         HB_SendTick(tickBuf);
-      }
+         SendTick(g_symbols[i], bid, ask);
    }
 
    // ── Send all open positions in our magic range ──
@@ -466,24 +351,20 @@ void OnTimer()
       if(ticket == 0) continue;
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic >= InpMagicStart && magic <= InpMagicEnd)
-      {
-         uchar posBuf[];
-         PackPosition(posBuf, ticket);
-         HB_SendPosition(posBuf);
-      }
+         SendPosition(ticket);
    }
 
    // ── Send account state ──
-   uchar acctBuf[];
-   PackAccount(acctBuf);
-   HB_SendAccount(acctBuf);
+   SendAccount();
 
-   // ── Process commands from Go ──
+   // ── Process commands from Go engine ──
    uchar cmdBuf[];
-   ArrayResize(cmdBuf, COMMAND_SIZE);
+   ArrayResize(cmdBuf, COMMAND_BYTES);
    while(HB_GetCommand(cmdBuf))
    {
-      ExecuteCommand(cmdBuf);
+      ShmCommand cmd;
+      CharArrayToStruct(cmd, cmdBuf);
+      ProcessCommand(cmd);
       ArrayInitialize(cmdBuf, 0);
    }
 
@@ -491,7 +372,7 @@ void OnTimer()
    datetime now = TimeCurrent();
    if(now - g_lastHeartbeat >= InpHeartbeatMs / 1000)
    {
-      HB_Heartbeat((long)now * 1000000000LL);
+      HB_Heartbeat((long)now * 1000000000);
       g_lastHeartbeat = now;
    }
 }
