@@ -1,0 +1,128 @@
+app:
+  env: "dev"
+  logLevel: "info"
+
+bridge:
+  sharedMemoryName: "HAYALET_SHM"
+  tickCapacity: 8192
+  positionCapacity: 4096
+  commandCapacity: 4096
+  accountCapacity: 1024
+
+engine:
+  defaultPreset: "range-default"
+  tickIntervalMs: 50
+  marketDetector:
+    atrPeriod: 14
+    adxPeriod: 14
+    rangeAdx: 20
+    trendAdx: 35
+  presets:
+    - name: "range-default"
+      gridSpacing: 10
+      maxLevels: 6
+      baseLot: 0.01
+      lotMultiplier: 1.2
+      tpPips: 5
+      cascadeLevels: 6
+    - name: "trend-wide"
+      gridSpacing: 25
+      maxLevels: 4
+      baseLot: 0.01
+      lotMultiplier: 1.1
+      tpPips: 10
+      cascadeLevels: 4
+    - name: "volatile-tight"
+      gridSpacing: 5
+      maxLevels: 8
+      baseLot: 0.01
+      lotMultiplier: 1.5
+      tpPips: 3
+      cascadeLevels: 3
+    - name: "scalp-fast"
+      gridSpacing: 3
+      maxLevels: 3
+      baseLot: 0.02
+      lotMultiplier: 1.0
+      tpPips: 2
+      cascadeLevels: 2
+
+risk:
+  drawdownLevels:
+    - name: "GREEN"
+      thresholdPercent: 0
+      maxGridLevel: 6
+      lotScale: 1.0
+      allowCascade: true
+      allowStealth: true
+      forceHedge: false
+      forceClose: false
+    - name: "YELLOW"
+      thresholdPercent: 10
+      maxGridLevel: 4
+      lotScale: 0.5
+      allowCascade: true
+      allowStealth: true
+      forceHedge: false
+      forceClose: false
+    - name: "ORANGE"
+      thresholdPercent: 20
+      maxGridLevel: 3
+      lotScale: 0.25
+      allowCascade: false
+      allowStealth: false
+      forceHedge: false
+      forceClose: false
+    - name: "RED"
+      thresholdPercent: 30
+      maxGridLevel: 2
+      lotScale: 0.1
+      allowCascade: false
+      allowStealth: false
+      forceHedge: true
+      forceClose: false
+    - name: "BLACK"
+      thresholdPercent: 40
+      maxGridLevel: 0
+      lotScale: 0.0
+      allowCascade: false
+      allowStealth: false
+      forceHedge: false
+      forceClose: true
+
+hedge:
+  enable: true
+  lockThresholdPip: 30
+  partialClosePip: 10
+  smartClosePnl: 5
+
+stealth:
+  enable: false
+  maxPositions: 3
+  maxHoldMinutes: 5
+  maxLossPerTrade: 20
+  maxLossPerDay: 100
+  pauseAfterLosses: 5
+  pauseMinutes: 15
+  magicRangeStart: 5000
+  magicRangeEnd: 5999
+  populationSize: 8
+  mutationRateBase: 0.05
+  mutationRateBoost: 0.20
+
+signal:
+  secret: "change-me-signal-secret"
+
+api:
+  listenAddress: ":8090"
+  jwtSecret: "change-me-jwt-secret"
+  rateLimitPerMinute: 120
+  rateLimitBurst: 30
+
+grpc:
+  listenAddress: ":8091"
+
+dashboard:
+  enabled: true
+  staticPath: "web/out"
+  defaultLocale: "tr"

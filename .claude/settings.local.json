@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get complete directory tree and file listing of the project)",
+      "Bash(dir \"C:\\\\Users\\\\qw\\\\Desktop\\\\go-trade\" /s /b)",
+      "Bash(dir \"C:\\\\Users\\\\qw\\\\Desktop\\\\go-trade\"\" /s /b 2>nul | findstr /E \".set)",
+      "Bash(.ini)",
+      "Bash(.txt)",
+      "Bash(.cfg \")",
+      "Bash(dir:*)",
+      "Bash(git init:*)",
+      "Bash(go mod init:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)"
+    ]
+  }
+}

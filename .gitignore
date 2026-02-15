@@ -1,0 +1,49 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+
+# Build output
+build/
+dist/
+
+# Go
+vendor/
+
+# Node.js / Next.js
+node_modules/
+web/.next/
+web/out/
+
+# Logs
+logs/
+*.log
+
+# Environment / Secrets
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Temporary
+tmp/
+temp/
+nul

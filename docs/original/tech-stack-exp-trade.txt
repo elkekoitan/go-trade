@@ -1,0 +1,187 @@
+HAYALET PROJECT — DÖKÜMAN 2: TEKNİK DÖKÜMAN (TECH STACK)
+Sistem Mimarisi, Teknoloji Seçimleri & Entegrasyon Haritası
+Versiyon 2.0 | Kod İçermez — Teknik Bileşen Açıklaması
+
+İÇİNDEKİLER
+1.  SİSTEM MİMARİSİ ÖZETİ
+2.  PROGRAMLAMA DİLLERİ VE RUNTIME
+3.  GO SERVİS KATMANI (ENGINE, API, CLI)
+4.  NATIVE BRIDGE KATMANI (C++ DLL)
+5.  MT4/MT5 EA KATMANI (MQL4/MQL5)
+6.  İLETİŞİM VE VERİ AKIŞI
+7.  VERİ MODELLERİ VE PAYLAŞIM BLOKLARI
+8.  API YÜZEYİ (REST/WS/gRPC)
+9.  KONFİGÜRASYON YÖNETİMİ
+10. LOGLAMA & METRİKLER
+11. TEST, DOĞRULAMA & BACKTEST
+12. BUILD & DAĞITIM
+13. KISITLAR VE UYUMLULUK
+
+1. SİSTEM MİMARİSİ ÖZETİ
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                          HAYALET MİMARİSİ                            │
+│                                                                     │
+│  MT4/MT5 Terminal                                                   │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │ EA (MQL4/MQL5)                                                │   │
+│  │ • Tick/Position/Account → DLL                                │   │
+│  │ • Komut alır (OPEN/CLOSE/MODIFY)                             │   │
+│  └───────────────┬──────────────────────────────────────────────┘   │
+│                  │ DLL (C++20)                                      │
+│                  ▼                                                  │
+│  Shared Memory (Primary IPC)                                        │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │ Tick/Position/Command/Account ring buffer                     │   │
+│  └───────────────┬──────────────────────────────────────────────┘   │
+│                  ▼                                                  │
+│  Go Engine                                                          │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │ Core Grid + Hedge + Stealth + Balance Guard                   │   │
+│  │ REST + WebSocket + gRPC                                       │   │
+│  │ CLI (bubbletea) + Verify + Backtest                           │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+
+2. PROGRAMLAMA DİLLERİ VE RUNTIME
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Katman                    │ Dil/Runtime                              │
+│ ──────────────────────────┼───────────────────────────────────────── │
+│ Engine + API              │ Go 1.24                                  │
+│ Native Bridge             │ C++20 (Windows API)                       │
+│ EA                         │ MQL4 / MQL5                               │
+│ CLI / Verify / Backtest   │ Go (tek binary araçlar)                   │
+│ Konfigürasyon             │ YAML                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+3. GO SERVİS KATMANI (ENGINE, API, CLI)
+
+Temel modüller:
+• Engine: grid, hedge, stealth, balance guard, circuit breaker
+• Store: anlık tick/position/account hafızası (in-memory)
+• MarketDetector: ATR/ADX tabanlı durum tespiti
+• API: REST + WebSocket
+• gRPC: temel servis yüzeyi
+• Araçlar: hayaletd, hayalet-cli, hayalet-verify, hayalet-backtest
+
+Kullanılan ana kütüphaneler:
+• go.uber.org/zap (log)
+• gopkg.in/natefinch/lumberjack.v2 (log rotation)
+• github.com/go-playground/validator/v10 (config doğrulama)
+• gopkg.in/yaml.v3 (config yükleme)
+• github.com/prometheus/client_golang (metrics)
+• google.golang.org/grpc (gRPC)
+• github.com/charmbracelet/bubbletea (CLI TUI)
+• golang.org/x/sys/windows (SHM erişimi)
+
+4. NATIVE BRIDGE KATMANI (C++ DLL)
+
+Amaç: MT4/MT5 ile Go arasında düşük gecikmeli veri paylaşımı.
+• Shared Memory oluşturma (CreateFileMapping, MapViewOfFile)
+• Ring buffer yapısı (Tick/Position/Command/Account)
+• DLL export fonksiyonları (HB_Init, HB_SendTick, HB_SendPosition, HB_SendAccount, HB_GetCommand, HB_Heartbeat)
+• CMake ile build (native/shm)
+• Hedef: Windows (Win32 + x64)
+
+5. MT4/MT5 EA KATMANI (MQL4/MQL5)
+
+• Tick ve pozisyon verisini DLL’e gönderir
+• Komut alır ve OrderSend/OrderClose/OrderModify uygular
+• Pending emirleri (limit/stop) destekler
+• AccountState raporlaması yapar
+• Bridge koparsa temel çalışma modunda kalabilir (survival)
+
+6. İLETİŞİM VE VERİ AKIŞI
+
+Birincil IPC:
+• Shared Memory ring buffer (DLL ↔ Go)
+
+Fallback zinciri (tasarım hedefi):
+• Named Pipe → TCP
+
+Dış girişler:
+• Webhook (TradingView vb.) → REST endpoint
+• External API → REST endpoint
+
+7. VERİ MODELLERİ VE PAYLAŞIM BLOKLARI
+
+Paylaşılan bloklar:
+• TickBlock: fiyat ve zaman damgası
+• PositionBlock: açık pozisyon ve pending bilgiler
+• CommandBlock: OPEN/CLOSE/MODIFY komutları
+• AccountStateBlock: bakiye, equity, margin, status
+
+Durum saklama:
+• In-memory store (Go)
+• Kalıcı saklama: log dosyaları
+
+8. API YÜZEYİ (REST/WS/gRPC)
+
+REST (HTTP, :8090)
+• /api/v1/accounts
+• /api/v1/positions
+• /api/v1/symbols
+• /api/v1/risk
+• /api/v1/performance
+• /api/v1/grids
+• /api/v1/presets
+• /api/v1/override
+• /api/v1/commands
+• /api/v1/signals
+• /api/v1/config
+
+WebSocket
+• /ws (tick/position/account/risk/alert yayınları)
+
+gRPC (TCP, :8091)
+• Status, Accounts, Positions, Symbols, Risk
+• Commands, Signals, Grids, Config, SendCommand, SetPreset
+
+Güvenlik:
+• JWT tabanlı erişim (Authorization: Bearer)
+• Webhook secret doğrulaması (X-Secret)
+• IP bazlı rate limit
+
+9. KONFİGÜRASYON YÖNETİMİ
+
+Dosya: config/config.yaml
+Başlıca bloklar:
+• app, bridge, engine, risk, hedge, stealth, signal, api, grpc
+
+10. LOGLAMA & METRİKLER
+
+Log:
+• JSON format
+• logs/hayalet.log (rotasyon: 50MB, 10 yedek, 30 gün)
+
+Metrikler:
+• Prometheus /metrics endpoint
+• Komut, sinyal, pending status sayaçları
+
+11. TEST, DOĞRULAMA & BACKTEST
+
+• engine/integration_test.go (entegrasyon testi)
+• hayalet-verify CLI (health/status/ws/override kontrolü)
+• hayalet-backtest CLI (CSV tabanlı backtest)
+
+12. BUILD & DAĞITIM
+
+Go:
+• hayaletd (ana servis)
+• hayalet-cli (izleme)
+• hayalet-verify (doğrulama)
+• hayalet-backtest (backtest)
+
+Native:
+• native/shm CMake build (DLL)
+
+EA:
+• MT4/MT5 terminalinde MQL4/MQL5 derleme
+
+13. KISITLAR VE UYUMLULUK
+
+• Hedef OS: Windows
+• MT4/MT5 terminal gereksinimi
+• SHM birincil iletişim (fallback zinciri planlı)
+• Veritabanı bağımlılığı yok (in-memory + log)

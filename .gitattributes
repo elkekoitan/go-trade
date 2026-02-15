@@ -1,0 +1,11 @@
+# Enforce LF line endings
+* text=auto eol=lf
+
+# Binary files
+*.exe binary
+*.dll binary
+*.ex4 binary
+*.ex5 binary
+*.png binary
+*.jpg binary
+*.ico binary

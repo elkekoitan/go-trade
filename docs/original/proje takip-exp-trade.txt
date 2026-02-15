@@ -1,0 +1,621 @@
+HAYALET PROJECT — DÖKÜMAN 3: PROJE TAKİP DOKÜMANI
+Fazlar, Görevler, Milestone'lar & Kabul Kriterleri
+Versiyon 2.0
+
+İÇİNDEKİLER
+text
+
+1.  PROJE ÖZET TAKVİM
+2.  FAZ 1: TEMEL ALTYAPI (Hafta 1-2)
+3.  FAZ 2: CORE TRADING (Hafta 3-4)
+4.  FAZ 3: RİSK & HEDGE (Hafta 5-6)
+5.  FAZ 4: PRESET & MULTI-ACCOUNT (Hafta 7-8)
+6.  FAZ 5: STEALTH HFT (Hafta 9-10)
+7.  FAZ 6: KULLANICI SİNYAL SİSTEMİ (Hafta 11-12)
+8.  FAZ 7: API & DASHBOARD (Hafta 13-14)
+9.  FAZ 8: BACKTEST & OPTİMİZASYON (Hafta 15-16)
+10. FAZ 9: SCALE & SERTLEŞTIRME (Hafta 17-18)
+11. FAZ 10: SON KONTROL & LANSMAN (Hafta 19-20)
+12. RİSK TABLOSU & BAĞIMLILIKLAR
+13. BAŞARI KRİTERLERİ (PROJE GENELİ)
+1. PROJE ÖZET TAKVİM
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  Hafta  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20
+│  ═══════════════════════════════════════════════════════════════  │
+│  FAZ 1  ████                                                     │
+│  Temel Altyapı (Bridge + SHM + EA)                               │
+│                                                                  │
+│  FAZ 2        ████                                               │
+│  Core Trading (Grid + Cascade + Emir)                            │
+│                                                                  │
+│  FAZ 3              ████                                         │
+│  Risk & Hedge (Balance Guard + Smart Close)                      │
+│                                                                  │
+│  FAZ 4                    ████                                   │
+│  Preset & Multi-Account                                          │
+│                                                                  │
+│  FAZ 5                          ████                             │
+│  Stealth HFT (Genom + Evrim)                                    │
+│                                                                  │
+│  FAZ 6                                ████                       │
+│  Kullanıcı Sinyal (Webhook + Custom Indicator)                   │
+│                                                                  │
+│  FAZ 7                                      ████                 │
+│  API & Dashboard (REST + WS + TUI)                               │
+│                                                                  │
+│  FAZ 8                                            ████           │
+│  Backtest & Optimizasyon                                         │
+│                                                                  │
+│  FAZ 9                                                  ████     │
+│  Scale & Sertleştirme (10 hesap + stres test)                    │
+│                                                                  │
+│  FAZ 10                                                     ████ │
+│  Son Kontrol & Demo Lansman                                      │
+│                                                                  │
+│  ─────────────────────────────────────────────────────────────── │
+│  KRİTİK YOL: FAZ 1 → FAZ 2 → FAZ 3 → FAZ 4                    │
+│  İlk 8 hafta gecikirse tüm proje kayar.                         │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+2. FAZ 1: TEMEL ALTYAPI (Hafta 1-2)
+Amaç: EA'dan Go'ya tick verisi akışını sağla, geri yönde komut gönderebil.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 1.01  │ Go proje iskeleti oluştur (cmd/internal) │ 0.5 │ □      │
+│ 1.02  │ Config sistemi (YAML loader + validator) │ 1   │ □      │
+│ 1.03  │ Logging altyapısı (zap, rotation)        │ 0.5 │ □      │
+│ 1.04  │ C++ DLL: Shared memory oluşturma         │ 1.5 │ □      │
+│       │ (CreateFileMapping, header block)         │     │        │
+│ 1.05  │ C++ DLL: SPSC ring buffer implementasyonu│ 2   │ □      │
+│       │ (atomic index, lock-free read/write)      │     │        │
+│ 1.06  │ C++ DLL: Export fonksiyonları             │ 1   │ □      │
+│       │ (HB_Init, SendTick, SendPosition,         │     │        │
+│       │  GetCommand, Heartbeat)                   │     │        │
+│ 1.07  │ C++ DLL: CMake build (32-bit + 64-bit)   │ 0.5 │ □      │
+│ 1.08  │ Go bridge: SHM reader (mmap Windows)     │ 1.5 │ □      │
+│ 1.09  │ Go bridge: Tick ring buffer consumer     │ 1   │ □      │
+│ 1.10  │ Go bridge: Command ring buffer producer  │ 1   │ □      │
+│ 1.11  │ TCP fallback: C++ server + Go client     │ 1.5 │ □      │
+│ 1.12  │ MQL4 EA: Temel bridge client             │ 1.5 │ □      │
+│       │ (OnTick→DLL, OnTimer→GetCommand)          │     │        │
+│ 1.13  │ MQL5 EA: Temel bridge client             │ 1   │ □      │
+│ 1.14  │ Heartbeat sistemi (iki yönlü)            │ 0.5 │ □      │
+│ 1.15  │ Entegrasyon testi:                        │ 1   │ □      │
+│       │ EA→DLL→SHM→Go tick alımı doğrulama       │     │        │
+│       │ Go→SHM→DLL→EA komut alımı doğrulama      │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 1: "İlk Tick"
+─────────────────────────
+Tarih: Hafta 2 sonu
+Kanıt: Go console'da canlı MT4/MT5 tick verisi görülüyor.
+       Go'dan gönderilen test komutu EA logunda görülüyor.
+
+KABUL KRİTERLERİ:
+  ✓ 1 hesap, 1 sembol tick akışı < 1ms latency
+  ✓ Go→EA komut round-trip çalışıyor
+  ✓ Heartbeat 1s aralıkla çalışıyor
+  ✓ Bridge kopunca fallback (TCP) devreye giriyor
+  ✓ Reconnect otomatik çalışıyor
+3. FAZ 2: CORE TRADING (Hafta 3-4)
+Amaç: Grid açma, kademe ekleme, bireysel TP, basket close, emir gönderme çalışsın.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 2.01  │ Account manager (hesap kaydı, state)     │ 1   │ □      │
+│ 2.02  │ Market modülü: tick işleme, candle build │ 1.5 │ □      │
+│ 2.03  │ Grid engine: seviye hesaplama            │ 1   │ □      │
+│       │ (aritmetik, geometrik, ATR-adaptif)       │     │        │
+│ 2.04  │ Grid engine: lot hesaplama               │ 1   │ □      │
+│       │ (sabit, katlamalı, custom dizi, bakiyeye  │     │        │
+│       │  oranlı — 4 model)                        │     │        │
+│ 2.05  │ Grid engine: 4 yönlü grid mantığı       │ 1.5 │ □      │
+│       │ (aynı yön sabit, aynı yön katlamalı,     │     │        │
+│       │  zıt yön sabit, zıt yön katlamalı)        │     │        │
+│ 2.06  │ Cascade engine: R1-R6 mantığı            │ 1   │ □      │
+│ 2.07  │ Cascade engine: K2-K6 bireysel TP        │ 1   │ □      │
+│ 2.08  │ Cascade engine: re-trigger mantığı       │ 1   │ □      │
+│ 2.09  │ Emir sistemi: OPEN/CLOSE/MODIFY komut    │ 1   │ □      │
+│       │ oluşturma ve CMD_RING'e yazma             │     │        │
+│ 2.10  │ Emir türleri: Market, Limit, Stop        │ 1   │ □      │
+│       │ (BUY LIMIT, SELL STOP, vb.)               │     │        │
+│ 2.11  │ EA: Komut parser + OrderSend/Close/Modify│ 1.5 │ □      │
+│ 2.12  │ EA: Pozisyon raporlama (tüm açık poz.)   │ 0.5 │ □      │
+│ 2.13  │ EA: Account state raporlama              │ 0.5 │ □      │
+│ 2.14  │ Go: Pozisyon tracking (SHM'den okuma)    │ 1   │ □      │
+│ 2.15  │ Basket close mekanizması                  │ 1   │ □      │
+│ 2.16  │ Temel preset yapısı (2-3 preset)          │ 0.5 │ □      │
+│ 2.17  │ Entegrasyon testi:                        │ 1   │ □      │
+│       │ Grid aç → R3'e cascade → K2-K3 TP →      │     │        │
+│       │ re-trigger → basket close                 │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 2: "İlk Trade"
+─────────────────────────
+Tarih: Hafta 4 sonu
+Kanıt: Demo hesapta grid açılıyor, kademeler tetikleniyor,
+       bireysel TP veya basket close ile kapanıyor.
+
+KABUL KRİTERLERİ:
+  ✓ BUY grid: R1→R3 cascade, fiyat dönünce K2 TP çalışıyor
+  ✓ SELL grid: Aynı mantık ters yönde çalışıyor
+  ✓ 4 lot modeli doğru hesaplıyor (unit test)
+  ✓ Limit ve Stop emirler broker'da oluşuyor
+  ✓ Basket close net kâr hedefinde tetikleniyor
+  ✓ Re-trigger: K2 kapandıktan sonra kalan grid yeniden hesaplanıyor
+  ✓ Pozisyon listesi Go tarafında doğru görünüyor
+4. FAZ 3: RİSK & HEDGE (Hafta 5-6)
+Amaç: Sermaye koruması tam çalışsın. Hedge lock + smart close aktif olsun.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 3.01  │ Risk manager: drawdown hesaplama         │ 1   │ □      │
+│       │ (peak equity tracking, anlık DD%)         │     │        │
+│ 3.02  │ Balance Guard: 5 seviye implementasyonu  │ 1.5 │ □      │
+│       │ (GREEN→YELLOW→ORANGE→RED→BLACK)           │     │        │
+│       │ Her seviyenin aksiyonları                 │     │        │
+│ 3.03  │ Balance Guard: seviye geçiş kuralları    │ 0.5 │ □      │
+│       │ (recovery onayı, 5 dk stabilite)          │     │        │
+│ 3.04  │ Hedge engine: tam hedge lock             │ 1   │ □      │
+│       │ (net exposure = 0 hesaplama + emir)        │     │        │
+│ 3.05  │ Hedge engine: kısmi hedge                │ 0.5 │ □      │
+│ 3.06  │ Hedge engine: gecikmeli hedge (stop emir)│ 0.5 │ □      │
+│ 3.07  │ Smart close: net kâr izleme + tetikleme  │ 1   │ □      │
+│ 3.08  │ Partial close: en kârlı poz. kapatma     │ 1   │ □      │
+│       │ + hedge orantılı küçültme                 │     │        │
+│ 3.09  │ Circuit breaker: spread spike, fiyat gap,│ 1   │ □      │
+│       │ hızlı zarar, bridge kopma algılama        │     │        │
+│ 3.10  │ Pozisyon limitleri: hesap/sembol maks     │ 0.5 │ □      │
+│ 3.11  │ Override sistemi: PAUSE/RESUME/HEDGE_ALL │ 1   │ □      │
+│       │ CLOSE_ALL/FREEZE/CLOSE_TICKET             │     │        │
+│ 3.12  │ Entegrasyon testi:                        │ 1.5 │ □      │
+│       │ Grid → R5 → Hedge lock → Smart close     │     │        │
+│       │ Balance Guard YELLOW→ORANGE geçişi        │     │        │
+│       │ Circuit breaker tetikleme + recovery      │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 3: "Güvenli Sistem"
+─────────────────────────────
+Tarih: Hafta 6 sonu
+Kanıt: Grid R5'e indiğinde hedge tetikleniyor,
+       smart close çalışıyor, Balance Guard seviyeleri aktif.
+
+KABUL KRİTERLERİ:
+  ✓ DD %10 → YELLOW: lot azalıyor, max seviye 4'e düşüyor
+  ✓ DD %20 → ORANGE: cascade freeze, stealth durur
+  ✓ DD %30 → RED: tüm gridler hedge'leniyor
+  ✓ DD %40 → BLACK: tüm pozisyonlar kapanıyor, sistem duruyor
+  ✓ Hedge lock: net exposure 0, zarar donuyor
+  ✓ Smart close: net kâr $5-10'a ulaşınca toplu kapatma
+  ✓ Partial close: en kârlı poz. kapanıyor, hedge küçülüyor
+  ✓ Circuit breaker: spread ×5 durumunda yeni emir durduruluyor
+  ✓ Manuel override çalışıyor (PAUSE, HEDGE_ALL, CLOSE_TICKET)
+5. FAZ 4: PRESET & MULTI-ACCOUNT (Hafta 7-8)
+Amaç: Dinamik preset geçişi çalışsın. 4 hesap paralel çalışsın.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 4.01  │ Piyasa durumu tespiti                     │ 1.5 │ □      │
+│       │ (ATR persentil, ADX, BB genişliği,        │     │        │
+│       │  spread, session tespiti)                  │     │        │
+│ 4.02  │ Preset kütüphanesi (tüm presetler YAML) │ 1   │ □      │
+│ 4.03  │ Preset otomatik geçiş mantığı           │ 1   │ □      │
+│       │ (durum→preset eşleştirme, stabilite,      │     │        │
+│       │  Balance Guard uyumluluk kontrolü)         │     │        │
+│ 4.04  │ SHM PRESET_BLOCK yazma (Go) + okuma (EA) │ 1   │ □      │
+│ 4.05  │ EA: preset değişikliği algılama ve        │ 1   │ □      │
+│       │ uygulama (version kontrolü)               │     │        │
+│ 4.06  │ Enstrüman profilleri                      │ 1   │ □      │
+│       │ (BTCUSD, ETHUSD, XAUUSD, EURUSD          │     │        │
+│       │  pip değeri, spread, ölçekleme)            │     │        │
+│ 4.07  │ Multi-account: 2. hesap bağlama ve test  │ 1   │ □      │
+│ 4.08  │ Multi-account: 3. ve 4. hesap             │ 0.5 │ □      │
+│ 4.09  │ Cross-account: global drawdown izleme    │ 1   │ □      │
+│ 4.10  │ Cross-account: korelasyon uyarısı        │ 0.5 │ □      │
+│ 4.11  │ Entegrasyon testi:                        │ 1.5 │ □      │
+│       │ 4 hesap paralel, preset geçişi < 100ms,  │     │        │
+│       │ farklı enstrümanlar, global risk aktif     │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 4: "Çoklu & Adaptif"
+───────────────────────────────
+Tarih: Hafta 8 sonu
+Kanıt: 4 hesap farklı sembollerle çalışıyor.
+       Piyasa durumu değişince preset otomatik geçiyor.
+
+KABUL KRİTERLERİ:
+  ✓ Piyasa durumu doğru tespit ediliyor (RANGE/TREND/VOLATILE)
+  ✓ Preset geçişi SHM üzerinden < 100ms
+  ✓ EA preset değişikliğini algılayıp uyguluyor
+  ✓ 4 hesap aynı anda aktif, bağımsız çalışıyor
+  ✓ Global drawdown hesaplanıyor
+  ✓ Korelasyon uyarısı (BTC+ETH aynı yön) çalışıyor
+  ✓ Enstrüman ölçeklemesi doğru (BTCUSD geniş, EURUSD dar grid)
+  ✓ Manuel preset seçimi otomatik geçişi override ediyor
+6. FAZ 5: STEALTH HFT (Hafta 9-10)
+Amaç: Bağımsız mikro-trade motoru çalışsın. Genom evrimsel optimizasyon aktif.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 5.01  │ Genom yapısı (7 gen, ağırlıklar)         │ 1   │ □      │
+│ 5.02  │ Gen hesaplama (tick_speed, spread_eff,    │ 1.5 │ □      │
+│       │  micro_trend, volume, mean_rev,           │     │        │
+│       │  momentum, regime)                        │     │        │
+│ 5.03  │ Birleşik skor → BUY/SELL/NEUTRAL karar  │ 0.5 │ □      │
+│ 5.04  │ Mikro-trade açma/kapama mantığı          │ 1   │ □      │
+│       │ (hedef $5-10, timeout 5dk)                │     │        │
+│ 5.05  │ Populasyon yönetimi (8 genom)             │ 1   │ □      │
+│ 5.06  │ Fitness hesaplama                         │ 0.5 │ □      │
+│ 5.07  │ Mutasyon + crossover (evrimsel döngü)    │ 1   │ □      │
+│ 5.08  │ Stealth risk kontrolleri                  │ 1   │ □      │
+│       │ (max 3 poz, 5 ardışık kayıp → mola,       │     │        │
+│       │  günlük $100 limit, timeout)               │     │        │
+│ 5.09  │ Magic number ayrımı (5000-5999)           │ 0.5 │ □      │
+│ 5.10  │ Core Grid ile çakışma kontrolü           │ 0.5 │ □      │
+│ 5.11  │ Stealth performans tracking              │ 0.5 │ □      │
+│ 5.12  │ Entegrasyon testi:                        │ 1.5 │ □      │
+│       │ 100 mikro-trade, win rate > %55,           │     │        │
+│       │ Core Grid ile paralel çalışma              │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 5: "İkinci Motor"
+───────────────────────────
+Tarih: Hafta 10 sonu
+Kanıt: Stealth HFT Core Grid'den bağımsız trade yapıyor.
+       Genom evrim döngüsü çalışıyor.
+
+KABUL KRİTERLERİ:
+  ✓ 100 mikro-trade tamamlandı, win rate > %55
+  ✓ Ortalama trade süresi < 5 dakika
+  ✓ Genom mutasyon/crossover her 100 trade'de çalışıyor
+  ✓ Kötü performansta mutasyon oranı artıyor
+  ✓ 5 ardışık kayıp → 15 dk mola çalışıyor
+  ✓ Core Grid hedge'deyken Stealth bağımsız çalışabiliyor
+  ✓ Balance Guard ORANGE'da Stealth duruyor
+  ✓ Magic 5000-5999 aralığında trade'ler görünüyor
+7. FAZ 6: KULLANICI SİNYAL SİSTEMİ (Hafta 11-12)
+Amaç: Kullanıcı TradingView, custom indicator veya dış API'den sinyal gönderebilsin.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 6.01  │ Webhook endpoint                          │ 1   │ □      │
+│       │ POST /api/v1/signal/webhook               │     │        │
+│       │ JSON parse, secret doğrulama              │     │        │
+│ 6.02  │ Webhook → Grid yön belirleme mantığı     │ 1   │ □      │
+│       │ (BUY/SELL/CLOSE/HEDGE/FLIP sinyalleri)    │     │        │
+│ 6.03  │ EA custom indicator okuma ve              │ 1   │ □      │
+│       │ HB_SendIndicator() ile gönderme           │     │        │
+│ 6.04  │ Go tarafı: indicator değer alımı ve       │ 1   │ □      │
+│       │ sinyal dönüştürme                         │     │        │
+│ 6.05  │ External API endpoint                     │ 0.5 │ □      │
+│       │ POST /api/v1/signal/external              │     │        │
+│ 6.06  │ Çoklu sinyal birleştirme                  │ 1.5 │ □      │
+│       │ (ağırlıklı skor, çatışma çözümü,          │     │        │
+│       │  öncelik sırası)                           │     │        │
+│ 6.07  │ Sinyal → Grid aksiyon router              │ 1   │ □      │
+│       │ (grid yok → aç, grid var aynı yön →       │     │        │
+│       │  ekle, grid var zıt yön → değerlendir)     │     │        │
+│ 6.08  │ Sinyal güven ağırlığı yönetimi            │ 0.5 │ □      │
+│ 6.09  │ Magic number ayrımı (6000-6999)           │ 0.5 │ □      │
+│ 6.10  │ Sinyal performans tracking                │ 0.5 │ □      │
+│       │ (hangi kaynak ne kadar doğru?)             │     │        │
+│ 6.11  │ Rate limit + replay koruması              │ 0.5 │ □      │
+│ 6.12  │ Entegrasyon testi:                        │ 1.5 │ □      │
+│       │ TradingView webhook → grid açılması,       │     │        │
+│       │ MT4 custom indicator → sinyal alımı,       │     │        │
+│       │ çoklu kaynak birleştirme                   │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 6: "Kullanıcı Edge'i"
+────────────────────────────────
+Tarih: Hafta 12 sonu
+Kanıt: TradingView'den webhook ile gönderilen sinyal
+       grid açılmasını tetikliyor.
+
+KABUL KRİTERLERİ:
+  ✓ Webhook sinyal alımı < 500ms
+  ✓ BUY sinyali → BUY grid başlıyor
+  ✓ SELL sinyali → SELL grid başlıyor
+  ✓ CLOSE sinyali → basket close tetikleniyor
+  ✓ HEDGE sinyali → hedge lock açılıyor
+  ✓ Custom indicator değeri EA→DLL→Go akışında geliyor
+  ✓ Çoklu sinyal çatışmasında NEUTRAL kararı çalışıyor
+  ✓ Secret key olmadan webhook reddediliyor
+  ✓ Sinyal kaynağı performansı kayıt altında
+8. FAZ 7: API & DASHBOARD (Hafta 13-14)
+Amaç: Sistemi izleme ve kontrol etme arayüzleri tamamlansın.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 7.01  │ REST API: hesap, pozisyon, grid endpoint │ 1.5 │ □      │
+│ 7.02  │ REST API: risk, performance endpoint     │ 1   │ □      │
+│ 7.03  │ REST API: komut, preset, override endpt  │ 1   │ □      │
+│ 7.04  │ JWT auth + rate limiting                  │ 1   │ □      │
+│ 7.05  │ WebSocket server + hub (subscription)    │ 1.5 │ □      │
+│ 7.06  │ WS: tick, position, risk, alert yayını   │ 1   │ □      │
+│ 7.07  │ gRPC: service tanımları + temel impl.    │ 1   │ □      │
+│ 7.08  │ CLI TUI dashboard (bubbletea)            │ 2   │ □      │
+│       │ (hesaplar, grid state, risk bar,          │     │        │
+│       │  kısayol tuşları: P/R/H/Q)                │     │        │
+│ 7.09  │ Prometheus metrics exporter              │ 0.5 │ □      │
+│ 7.10  │ Health check endpoint'leri               │ 0.5 │ □      │
+│ 7.11  │ Entegrasyon testi:                        │ 1   │ □      │
+│       │ Dashboard'da 4+ hesap canlı görünüyor,    │     │        │
+│       │ override komutları çalışıyor               │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 7: "Kontrol Merkezi"
+──────────────────────────────
+Tarih: Hafta 14 sonu
+Kanıt: CLI dashboard'da tüm hesaplar canlı izleniyor.
+       REST API üzerinden komut gönderilebiliyor.
+
+KABUL KRİTERLERİ:
+  ✓ REST API tüm endpoint'ler çalışıyor
+  ✓ WebSocket tick ve pozisyon stream'i aktif
+  ✓ CLI TUI'da hesap tablosu, grid durumu, risk barı görünüyor
+  ✓ Dashboard'dan PAUSE/RESUME/HEDGE çalışıyor
+  ✓ JWT olmadan erişim reddediliyor
+  ✓ Prometheus metrics endpoint'ten metrikler okunuyor
+  ✓ /health/ready doğru cevap veriyor
+9. FAZ 8: BACKTEST & OPTİMİZASYON (Hafta 15-16)
+Amaç: Strateji parametrelerini geçmiş veriyle test etme ve optimize etme.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 8.01  │ Geçmiş veri yükleme (CSV/HST)            │ 1   │ □      │
+│ 8.02  │ Candle-bazlı simülasyon motoru           │ 1.5 │ □      │
+│ 8.03  │ Simüle order execution                    │ 1.5 │ □      │
+│       │ (market fill, limit/stop tetikleme,        │     │        │
+│       │  spread modeli, slippage, komisyon)         │     │        │
+│ 8.04  │ Grid/Cascade backtest entegrasyonu       │ 1   │ □      │
+│       │ (aynı strategy kodu, farklı executor)      │     │        │
+│ 8.05  │ Hedge simülasyonu                         │ 0.5 │ □      │
+│ 8.06  │ Parametre optimizer: grid search          │ 1   │ □      │
+│ 8.07  │ Parametre optimizer: genetik algoritma   │ 1.5 │ □      │
+│ 8.08  │ Walk-forward analiz (3ay/1ay)             │ 1   │ □      │
+│ 8.09  │ Backtest rapor üretimi                    │ 1   │ □      │
+│       │ (equity eğrisi, metrikler, grid dağılımı) │     │        │
+│ 8.10  │ CLI backtest runner                       │ 0.5 │ □      │
+│ 8.11  │ Entegrasyon testi:                        │ 1   │ □      │
+│       │ 2 yıllık BTCUSD backtest çalıştırma,      │     │        │
+│       │ sonuçları doğrulama                        │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 8: "Geçmiş Doğrulama"
+────────────────────────────────
+Tarih: Hafta 16 sonu
+Kanıt: 2 yıllık veri ile backtest çalışıyor,
+       rapor anlamlı metrikler üretiyor.
+
+KABUL KRİTERLERİ:
+  ✓ CSV veri yükleme çalışıyor
+  ✓ Grid + cascade backtest sonuçları makul
+  ✓ Hedge simülasyonu backtest'e dahil
+  ✓ Grid search optimizer çalışıyor
+  ✓ Walk-forward analiz overfit koruması sağlıyor
+  ✓ Raporda equity eğrisi, DD, profit factor var
+  ✓ hayalet-backtest CLI aracı çalışıyor
+10. FAZ 9: SCALE & SERTLEŞTIRME (Hafta 17-18)
+Amaç: 10 hesaba ölçekle. Stres testi yap. Edge case'leri kapat.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 9.01  │ 5-10 hesap bağlama ve paralel çalıştırma│ 1   │ □      │
+│ 9.02  │ Named pipe fallback implementasyonu      │ 1   │ □      │
+│ 9.03  │ Otomatik bridge mod seçimi ve failover   │ 1   │ □      │
+│ 9.04  │ Stres testi: 10K tick/s per account      │ 1   │ □      │
+│ 9.05  │ Memory leak testi: 72 saat sürekli çalış.│ 1   │ □      │
+│       │ (pprof profiling, heap izleme)            │     │        │
+│ 9.06  │ Bridge kopma/reconnect stres testi       │ 1   │ □      │
+│ 9.07  │ Hot config reload (restart gerektirmez)  │ 0.5 │ □      │
+│ 9.08  │ Crash recovery: state persist + rebuild  │ 1.5 │ □      │
+│       │ (Go restart → SHM'den state oku →         │     │        │
+│       │  grid state yeniden oluştur)               │     │        │
+│ 9.09  │ Error handling audit                      │ 1   │ □      │
+│       │ (tüm hata yolları gözden geçir)           │     │        │
+│ 9.10  │ Graceful shutdown                         │ 0.5 │ □      │
+│ 9.11  │ Entegrasyon testi:                        │ 1.5 │ □      │
+│       │ 10 hesap, 72 saat kesintisiz çalışma,     │     │        │
+│       │ en az 1 bridge kopma+recovery,             │     │        │
+│       │ en az 1 Go restart+state recovery          │     │        │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 9: "Üretim Kalitesi"
+──────────────────────────────
+Tarih: Hafta 18 sonu
+Kanıt: 10 hesap 72 saat kesintisiz çalışıyor.
+       Memory leak yok. Crash recovery çalışıyor.
+
+KABUL KRİTERLERİ:
+  ✓ 10 hesap aynı anda aktif, birbirini etkilemiyor
+  ✓ SHM → Pipe → TCP fallback zinciri otomatik çalışıyor
+  ✓ 10K tick/s yük altında latency < 5ms
+  ✓ 72 saat sonunda memory kullanımı başlangıçtan < %20 fazla
+  ✓ Go engine restart → state 30s içinde rebuild oluyor
+  ✓ Graceful shutdown: state persist, SHM temizlenmiş
+  ✓ Tüm hata logları anlamlı, stack trace var
+11. FAZ 10: SON KONTROL & LANSMAN (Hafta 19-20)
+Amaç: Dokümantasyon, son testler, 1 hafta demo gözlem.
+
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ID    │ Görev                                    │ Gün │ Durum  │
+│ ──────┼──────────────────────────────────────────┼─────┼─────── │
+│ 10.01 │ README ve kurulum kılavuzu               │ 1   │ □      │
+│ 10.02 │ API dokümantasyonu                        │ 0.5 │ □      │
+│ 10.03 │ Operatör kullanım kılavuzu               │ 1   │ □      │
+│ 10.04 │ Deploy script'leri (EA kopyalama, config) │ 0.5 │ □      │
+│ 10.05 │ Edge case gözden geçirme                 │ 1   │ □      │
+│       │ (hafta sonu gap, broker maintenance,       │     │        │
+│       │  sıfır tick, max lot aşımı, vb.)           │     │        │
+│ 10.06 │ Performance profiling + fine-tuning       │ 1   │ □      │
+│ 10.07 │ Backup & restore prosedürü               │ 0.5 │ □      │
+│ 10.08 │ Final entegrasyon testi (tüm bileşenler) │ 1   │ □      │
+│ 10.09 │ DEMO LANSMAN: 1 hafta gözlem              │ 5   │ □      │
+│       │ → 10 hesap aktif                           │     │        │
+│       │ → Tüm stratejiler çalışıyor               │     │        │
+│       │ → Günlük performans raporu                 │     │        │
+│       │ → Anomali varsa düzeltme                   │     │        │
+│ 10.10 │ Gözlem raporu ve sonuç değerlendirmesi   │ 0.5 │ □      │
+└──────────────────────────────────────────────────────────────────┘
+
+MILESTONE 10: "LANSMAN"
+───────────────────────
+Tarih: Hafta 20 sonu
+Kanıt: 1 hafta demo çalışması sorunsuz tamamlandı.
+
+KABUL KRİTERLERİ:
+  ✓ 1 hafta boyunca sistem çalıştı, kritik hata yok
+  ✓ Tüm hesaplarda trade açılıp kapandı
+  ✓ Balance Guard en az 1 kez YELLOW'a geçip recovery yaptı
+  ✓ Preset en az 3 kez otomatik geçiş yaptı
+  ✓ Hedge en az 1 kez tetiklenip smart close ile çözüldü
+  ✓ Dashboard ve CLI sorunsuz çalışıyor
+  ✓ Dokümantasyon eksiksiz
+  ✓ Proje teslime hazır
+12. RİSK TABLOSU & BAĞIMLILIKLAR
+12.1 Proje Riskleri
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│ Risk                         │ Olasılık │ Etki   │ Önlem        │
+│ ─────────────────────────────┼──────────┼────────┼───────────── │
+│ DLL 32-bit/64-bit uyum       │ ORTA     │ YÜKSEK │ Erken test,  │
+│ sorunları                    │          │        │ ayrı CMake   │
+│                              │          │        │ target       │
+│ ─────────────────────────────┼──────────┼────────┼───────────── │
+│ SHM Windows API karmaşıklığı│ ORTA     │ YÜKSEK │ FAZ 1'de     │
+│                              │          │        │ öncelikli    │
+│ ─────────────────────────────┼──────────┼────────┼───────────── │
+│ MT4/MT5 DLL izin sorunları   │ DÜŞÜK    │ ORTA   │ Broker test  │
+│ (bazı brokerlar DLL kısıtlar)│          │        │ listesi      │
+│ ─────────────────────────────┼──────────┼────────┼───────────── │
+│ Broker spread/slippage       │ ORTA     │ ORTA   │ Spread       │
+│ farklılıkları                │          │        │ monitoring   │
+│ ─────────────────────────────┼──────────┼────────┼───────────── │
+│ CGo + mmap cross-compile     │ DÜŞÜK    │ YÜKSEK │ Sadece       │
+│ sorunları                    │          │        │ Windows'ta   │
+│                              │          │        │ build        │
+│ ─────────────────────────────┼──────────┼────────┼───────────── │
+│ Grid parametreleri yanlış    │ ORTA     │ YÜKSEK │ Backtest ile │
+│ seçilirse büyük drawdown     │          │        │ doğrulama    │
+│ ─────────────────────────────┼──────────┼────────┼───────────── │
+│ 10 MT4/MT5 terminali         │ DÜŞÜK    │ ORTA   │ VPS kaynak   │
+│ kaynak tüketimi              │          │        │ planlaması   │
+└──────────────────────────────────────────────────────────────────┘
+12.2 Faz Bağımlılıkları
+text
+
+FAZ 1 ──→ FAZ 2 ──→ FAZ 3 ──→ FAZ 4
+  │                    │
+  │                    └──→ FAZ 5 (Stealth, hedge'den sonra)
+  │
+  └──→ FAZ 6 (Sinyal, bridge'den sonra)
+
+FAZ 4 ──→ FAZ 7 (API, multi-account'tan sonra)
+FAZ 2 ──→ FAZ 8 (Backtest, grid engine'den sonra)
+FAZ 7 + FAZ 8 ──→ FAZ 9 (Scale, her şey hazır)
+FAZ 9 ──→ FAZ 10 (Lansman)
+
+KRİTİK YOL: FAZ 1 → FAZ 2 → FAZ 3 → FAZ 4
+Bu 4 faz gecikmezse proje takvimde kalır.
+
+PARALEL ÇALIŞABİLECEK İKİLİLER:
+  FAZ 5 (Stealth) + FAZ 6 (Sinyal)  → aynı anda yapılabilir
+  FAZ 7 (API) + FAZ 8 (Backtest)    → aynı anda yapılabilir
+13. BAŞARI KRİTERLERİ (PROJE GENELİ)
+text
+
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  PROJE TAMAMLANMIŞ SAYILMASI İÇİN:                              │
+│                                                                  │
+│  ZORUNLU (hepsi sağlanmalı):                                     │
+│  ──────────────────────────────────────────────────────────────  │
+│  ✓ 10 demo hesap aynı anda bağlanabiliyor                       │
+│  ✓ 4 enstrüman destekleniyor (BTC, ETH, XAU, EUR)               │
+│  ✓ Grid trading 4 modda çalışıyor (aynı/zıt × sabit/katlamalı) │
+│  ✓ Cascade R1-R6, bireysel TP (K2-K6), re-trigger çalışıyor    │
+│  ✓ Stoploss YOK, smart close + hedge ile zarar yönetimi aktif   │
+│  ✓ Basket close çalışıyor                                        │
+│  ✓ Limit ve Stop emirler (düşerken/çıkarken lot artırma)        │
+│  ✓ Balance Guard 5 seviye koruma aktif                           │
+│  ✓ Circuit breaker çalışıyor                                     │
+│  ✓ Preset otomatik geçiş çalışıyor (< 100ms)                    │
+│  ✓ TradingView webhook sinyal alımı çalışıyor                   │
+│  ✓ Custom indicator sinyal alımı çalışıyor                       │
+│  ✓ CLI dashboard canlı izleme sağlıyor                           │
+│  ✓ REST API tüm komutları destekliyor                            │
+│  ✓ Manuel override her zaman çalışıyor                           │
+│  ✓ DLL bridge < 1ms latency (SHM modunda)                       │
+│  ✓ Bridge kopma→recovery otomatik                                │
+│  ✓ 72 saat kesintisiz çalışma (stres test geçmiş)               │
+│  ✓ 1 hafta demo gözlem sorunsuz tamamlanmış                     │
+│                                                                  │
+│  İSTENEN (olursa iyi, olmasa proje tamamlanır):                  │
+│  ──────────────────────────────────────────────────────────────  │
+│  ○ Web frontend dashboard                                        │
+│  ○ Telegram/email alert entegrasyonu                             │
+│  ○ Monte Carlo risk analizi                                      │
+│  ○ Bayesian optimizasyon                                         │
+│  ○ gRPC streaming tam implementasyon                             │
+│  ○ Tick-by-tick backtest modu                                    │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+text
+
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║    HAYALET PROJECT — DÖKÜMAN 3: PROJE TAKİP DOKÜMANI         ║
+║                                                              ║
+║    Versiyon: 2.0                                              ║
+║    Toplam Bölüm: 13                                          ║
+║    Toplam Faz: 10                                            ║
+║    Toplam Görev: ~115                                        ║
+║    Toplam Süre: 20 hafta                                     ║
+║    Milestone: 10 adet                                        ║
+║                                                              ║
+║    DÖKÜMAN SETİ:                                              ║
+║    ─────────────                                              ║
+║    Döküman 1: Analiz     → NE ve NEDEN                       ║
+║    Döküman 2: Teknik     → NASIL                             ║
+║    Döküman 3: Takip      → NE ZAMAN                          ║
+║                                                              ║
+║    Her faz başında ilgili döküman bölümleri                   ║
+║    gözden geçirilmelidir.                                    ║
+║    Her milestone'da kabul kriterleri kontrol edilmelidir.     ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝

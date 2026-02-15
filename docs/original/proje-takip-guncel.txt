@@ -1,0 +1,180 @@
+HAYALET PROJECT — GÜNCEL PROJE TAKİP DOKÜMANI
+Versiyon 2.1 | Tarih: 2026-02-07
+
+KAYNAK DOKÜMANLAR
+1) c:\Users\qw\Desktop\expert-trade\proje takip-exp-trade.txt
+2) c:\Users\qw\Desktop\expert-trade\analiz-exp-trade.txt
+3) c:\Users\qw\Desktop\expert-trade\tech-stack-exp-trade.txt
+
+AMAÇ
+Bu doküman, proje takip dokümanındaki fazlara sadık kalarak:
+- Tamamlanan işleri ve kanıtlarını
+- Açık işleri ve alt görevlerini
+- Sonraki adım planını
+tek bir yerde düzenli şekilde tutar. Düzenli güncellenecektir.
+
+KONTROL LİSTESİ (HER İŞTEN ÖNCE)
+- analiz-exp-trade.txt ilgili bölümler
+- proje takip-exp-trade.txt ilgili faz ve alt görevler
+- proje-takip-guncel.txt son durum
+- tech-stack-exp-trade.txt teknoloji ve kısıtlar
+
+GÜNCEL DURUM ÖZETİ
+- Dashboard geliştirildi (sekmeli arayüz, metrikler, sinyal/komut tabloları).
+- SHM layout v2’ye yükseltildi ve AccountState akışı eklendi.
+- MT4/MT5 EA tarafına AccountState gönderimi eklendi.
+- Go tarafında account okuma ve dashboard görünümü eklendi.
+- API portu 8090’a alındı.
+- Doküman kontrol listesi eklendi (bu dosya).
+
+KABUL KRİTERİNE GÖRE KONUM
+- FAZ 1 (Temel Altyapı): Kısmen tamamlandı, SHM v2 + EA akışı hazır.
+- FAZ 2 (Core Trading): Grid/hedge temel iskelet var, belgeye göre tam kapsamlı değil.
+- FAZ 7 (API & Dashboard): Dashboard önemli ölçüde tamamlandı, kontrol komutları eksik.
+
+YAPILAN İŞLER (DETAYLI)
+1) SHM v2 ve AccountState halkası
+   - SHM header’a AccountCapacity, AccountWrite, AccountRead eklendi
+   - Account ring buffer layout eklendi
+   - Go bridge okuma desteği eklendi
+   - MT4/MT5 EA account state gönderimi eklendi
+   - SHM versiyonu 2’ye yükseltildi
+   Kanıt dosyaları:
+   - native/shm/hayalet_shm.cpp
+   - internal/bridge/shm_layout.go
+   - internal/bridge/shm_windows.go
+   - ea/mt4/HayaletEA.mq4
+   - ea/mt5/HayaletEA.mq5
+
+2) Dashboard genişletme
+   - Sekmeler: Genel, Semboller, Pozisyonlar, Hesaplar, Sinyaller, Komutlar, Ayarlar
+   - Metrikler: tick/position/signal/command sayıları, son tick yaşı, uptime
+   - Ayarlar: SHM kapasite, MarketDetector, Hedge/Stealth parametreleri
+   Kanıt dosyası:
+   - internal/api/api.go
+
+3) Config güncellemeleri
+   - accountCapacity eklendi
+   - API listenAddress 8090
+   Kanıt dosyaları:
+   - config/config.yaml
+   - internal/config/config.go
+
+4) Engine/Store genişletmeleri
+   - AccountState okuma ve store’a yazma
+   - Status çıktısına config ve metrikler ekleme
+   Kanıt dosyaları:
+   - internal/engine/engine.go
+   - internal/engine/store.go
+
+FAZ 1 — TEMEL ALTYAPI (Hafta 1-2)
+Amaç: EA↔DLL↔SHM↔Go akışının sağlıklı çalışması.
+
+Durum: Kısmen tamamlandı.
+
+Alt Görevler
+1.01 Go proje iskeleti oluştur — TAMAM
+1.02 Config sistemi (YAML loader + validator) — TAMAM
+1.03 Logging altyapısı — KISMEN (mevcut)
+1.04 C++ DLL: Shared memory oluşturma — TAMAM (v2)
+1.05 C++ DLL: SPSC ring buffer — TAMAM (tick/position/command/account)
+1.06 C++ DLL: Export fonksiyonları — TAMAM (HB_Init/HB_SendTick/HB_SendPosition/HB_SendAccount/HB_GetCommand/HB_Heartbeat)
+1.07 C++ DLL: CMake build (32-bit + 64-bit) — 32-bit TAMAM, 64-bit AÇIK
+1.08 Go bridge: SHM reader — TAMAM
+1.09 Go bridge: Tick ring buffer consumer — TAMAM
+1.10 Go bridge: Command ring buffer producer — TAMAM
+1.11 TCP fallback — AÇIK
+1.12 MQL4 EA: Temel bridge client — TAMAM
+1.13 MQL5 EA: Temel bridge client — TAMAM
+1.14 Heartbeat sistemi — KISMEN (SHM heartbeat yazılıyor)
+1.15 Entegrasyon testi — AÇIK
+
+MILESTONE 1: "İlk Tick"
+Durum: Kısmen doğrulandı, canlı ortam testleri gerekir.
+Gereken kanıt:
+- Go’da canlı tick akışı
+- Go’dan EA’ya komut round-trip
+- Heartbeat 1s
+- Bridge kopma/fallback testi
+
+FAZ 2 — CORE TRADING (Hafta 3-4)
+Amaç: Grid açma, kademe ekleme, bireysel TP, basket close, emir gönderme.
+
+Durum: Temel iskelet var, dokümana göre tam değil.
+
+Alt Görevler (Açık)
+2.01 Account manager — AÇIK
+2.02 Market modülü: tick işleme, candle — AÇIK
+2.03 Grid engine: seviye hesaplama (aritmetik/geometrik/ATR-adaptif) — AÇIK
+2.04 Grid engine: lot modelleri (4 model) — AÇIK
+2.05 4 yönlü grid mantığı — KISMEN
+2.06 Cascade engine: R1-R6 — AÇIK
+2.07 Cascade engine: K2-K6 bireysel TP — AÇIK
+2.08 Cascade engine: re-trigger — AÇIK
+2.09 Emir sistemi: OPEN/CLOSE/MODIFY komut üretimi — KISMEN
+2.10 Emir türleri: Market/Limit/Stop — AÇIK
+2.11 EA: Komut parser + OrderSend/Close/Modify — KISMEN
+2.12 EA: Pozisyon raporlama — TAMAM
+2.13 EA: Account state raporlama — TAMAM
+2.14 Go: Pozisyon tracking — TAMAM
+2.15 Basket close — KISMEN
+2.16 Temel preset yapısı — TAMAM (config ile)
+2.17 Entegrasyon testi — AÇIK
+
+FAZ 3 — RİSK & HEDGE (Hafta 5-6)
+Durum: Temel hedge/smart close var, Balance Guard ve circuit breaker eksik.
+Alt Görevler (Açık)
+3.01 Risk manager: drawdown — AÇIK
+3.02 Balance Guard seviyeleri — AÇIK
+3.03 Seviye geçiş kuralları — AÇIK
+3.04 Tam hedge lock — KISMEN
+3.05 Kısmi hedge — KISMEN
+3.06 Gecikmeli hedge — AÇIK
+3.07 Smart close — TAMAM (temel)
+3.08 Partial close — AÇIK
+3.09 Circuit breaker — AÇIK
+3.10 Pozisyon limitleri — AÇIK
+3.11 Override sistemi — AÇIK
+3.12 Entegrasyon testi — AÇIK
+
+FAZ 4 — PRESET & MULTI-ACCOUNT (Hafta 7-8)
+Durum: Config preset var, otomatik preset ve multi-account eksik.
+Alt Görevler (Açık)
+4.01 Piyasa durumu tespiti — AÇIK
+4.02 Preset kütüphanesi — KISMEN
+4.03 Preset otomatik geçiş — AÇIK
+4.04 SHM PRESET_BLOCK — AÇIK
+4.05 EA preset uygulama — AÇIK
+4.06 Enstrüman profilleri — AÇIK
+4.07-4.10 Multi-account ve global risk — AÇIK
+4.11 Entegrasyon testi — AÇIK
+
+FAZ 5 — STEALTH HFT (Hafta 9-10)
+Durum: Temel yapı var, genom/evrimsel kısım eksik.
+Alt Görevler: Açık (tamamı)
+
+FAZ 6 — KULLANICI SİNYAL SİSTEMİ (Hafta 11-12)
+Durum: Webhook sinyal endpoint var, çatışma ve performans kaydı eksik.
+Alt Görevler: Kısmen açık
+
+FAZ 7 — API & DASHBOARD (Hafta 13-14)
+Durum: Dashboard büyük ölçüde tamam, kontrol komutları ve WS eksik.
+Alt Görevler (Açık)
+- WebSocket tick/pozisyon stream
+- Dashboard override komutları (PAUSE/RESUME/HEDGE/CLOSE)
+- Health/ready endpoint
+- Prometheus metrics
+
+SONRAKİ ADIM PLANI (ÖNCEKİ DOĞRULAMAYA BAĞLI)
+1) FAZ 1.15 Entegrasyon testi
+   - Canlı MT4 Tick akışı doğrulama
+   - Go→EA komut round-trip
+   - Heartbeat doğrulama
+2) FAZ 2.01–2.09 Core Trading tamamlanması
+3) FAZ 3 Balance Guard + Circuit breaker
+4) FAZ 4 Preset otomatik geçiş + multi-account
+
+GÜNCELLEME NOTU
+Bu doküman, her değişiklikten sonra güncellenecek. Her yeni işlemde:
+- Yapılan iş eklenecek
+- İlgili faz görevleri “TAMAM/KISMEN/AÇIK” olarak güncellenecek
