@@ -1,0 +1,55 @@
+{
+  "nav": {
+    "overview": "Genel Bakis",
+    "positions": "Pozisyonlar",
+    "grids": "Grid",
+    "settings": "Ayarlar"
+  },
+  "overview": {
+    "title": "HAYALET Dashboard",
+    "engine": "Motor",
+    "bridge": "Bridge",
+    "guard": "Guard",
+    "uptime": "Calisiyor",
+    "balance": "Bakiye",
+    "equity": "Equity",
+    "margin": "Marjin",
+    "drawdown": "Drawdown",
+    "ticks": "Tick",
+    "positions": "Pozisyon",
+    "commands": "Komut",
+    "symbols": "Sembol",
+    "accounts": "Hesap",
+    "connected": "Bagli",
+    "disconnected": "Baglanti Yok"
+  },
+  "positions": {
+    "title": "Acik Pozisyonlar",
+    "symbol": "Sembol",
+    "side": "Yon",
+    "volume": "Lot",
+    "price": "Fiyat",
+    "magic": "Magic",
+    "profit": "Kar/Zarar",
+    "time": "Zaman",
+    "noPositions": "Acik pozisyon yok"
+  },
+  "grids": {
+    "title": "Grid Durumu",
+    "symbol": "Sembol",
+    "active": "Aktif",
+    "direction": "Yon",
+    "anchor": "Anchor",
+    "level": "Seviye",
+    "lots": "Toplam Lot",
+    "pl": "K/Z",
+    "noGrids": "Aktif grid yok"
+  },
+  "controls": {
+    "pause": "Duraklat",
+    "resume": "Devam Et",
+    "hedgeAll": "Hepsini Hedge Et",
+    "closeAll": "Hepsini Kapat",
+    "freeze": "Dondur"
+  }
+}

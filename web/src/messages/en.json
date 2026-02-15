@@ -1,0 +1,55 @@
+{
+  "nav": {
+    "overview": "Overview",
+    "positions": "Positions",
+    "grids": "Grids",
+    "settings": "Settings"
+  },
+  "overview": {
+    "title": "HAYALET Dashboard",
+    "engine": "Engine",
+    "bridge": "Bridge",
+    "guard": "Guard",
+    "uptime": "Uptime",
+    "balance": "Balance",
+    "equity": "Equity",
+    "margin": "Margin",
+    "drawdown": "Drawdown",
+    "ticks": "Ticks",
+    "positions": "Positions",
+    "commands": "Commands",
+    "symbols": "Symbols",
+    "accounts": "Accounts",
+    "connected": "Connected",
+    "disconnected": "Disconnected"
+  },
+  "positions": {
+    "title": "Open Positions",
+    "symbol": "Symbol",
+    "side": "Side",
+    "volume": "Volume",
+    "price": "Price",
+    "magic": "Magic",
+    "profit": "P&L",
+    "time": "Time",
+    "noPositions": "No open positions"
+  },
+  "grids": {
+    "title": "Grid Status",
+    "symbol": "Symbol",
+    "active": "Active",
+    "direction": "Direction",
+    "anchor": "Anchor",
+    "level": "Level",
+    "lots": "Total Lots",
+    "pl": "P&L",
+    "noGrids": "No active grids"
+  },
+  "controls": {
+    "pause": "Pause",
+    "resume": "Resume",
+    "hedgeAll": "Hedge All",
+    "closeAll": "Close All",
+    "freeze": "Freeze"
+  }
+}
