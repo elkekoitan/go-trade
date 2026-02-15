@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"go-trade/internal/api"
 	"go-trade/internal/bridge"
 	"go-trade/internal/config"
 	"go-trade/internal/engine"
@@ -38,7 +39,7 @@ func (a *App) Run() error {
 	defer log.Sync()
 
 	log.Info("starting hayalet",
-		zap.String("version", "0.1.0"),
+		zap.String("version", "0.2.0"),
 		zap.String("log_level", a.cfg.App.LogLevel),
 	)
 
@@ -67,21 +68,30 @@ func (a *App) Run() error {
 		seedDemoData(eng, log)
 	}
 
-	// TODO Phase 4: Start API server
-	// TODO Phase 4: Start gRPC server
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 4)
+
+	// Start engine
 	go func() {
 		errCh <- eng.Run(ctx)
 	}()
+
+	// Start API server
+	apiSrv := api.NewServer(a.cfg.API.ListenAddress, eng, log)
+	go func() {
+		errCh <- apiSrv.Run(ctx)
+	}()
+	log.Info("api_server_starting", zap.String("address", a.cfg.API.ListenAddress))
 
 	// If demo mode, start live tick simulator
 	if br.Mode() == bridge.ModePipe {
 		go demoTickLoop(ctx, eng, log)
 	}
+
+	// WebSocket broadcast loop (1 second interval)
+	go wsBroadcastLoop(ctx, eng, apiSrv.HubRef())
 
 	// Wait for shutdown signal or fatal error
 	sigCh := make(chan os.Signal, 1)
@@ -99,6 +109,25 @@ func (a *App) Run() error {
 	cancel()
 	log.Info("hayalet stopped")
 	return nil
+}
+
+// wsBroadcastLoop sends periodic state updates to WebSocket clients.
+func wsBroadcastLoop(ctx context.Context, eng *engine.Engine, hub *api.Hub) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if hub.ClientCount() == 0 {
+				continue
+			}
+			status := eng.Status()
+			hub.Broadcast("status", status)
+		}
+	}
 }
 
 // seedDemoData populates the engine store with TickMill demo account data.

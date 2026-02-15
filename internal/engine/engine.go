@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 
 // Engine is the main trading engine orchestrator.
 // It reads ticks/positions/accounts from the bridge, updates the store,
-// and dispatches commands back through the bridge.
+// runs grid/cascade/guard/smartclose logic, and dispatches commands.
 type Engine struct {
 	store    *Store
 	bridge   *bridge.Bridge
@@ -26,26 +27,39 @@ type Engine struct {
 	metrics  Metrics
 	recentCmds []model.Command
 	paused   bool
+	frozen   bool
 	cfg      ConfigSnapshot
+	fullCfg  *config.Config
 	logger   *zap.Logger
+
+	// Phase 2 modules
+	guard        *Guard
+	gridMgr      *GridManager
+	cascadeMgr   *CascadeManager
+	smartClose   *SmartClose
+	detector     *MarketDetector
+	consolFilter *ConsolidationFilter
+	scoring      *Scoring
 }
 
 // Status represents the current engine state for API consumers.
 type Status struct {
-	Time          time.Time       `json:"time"`
-	StartedAt     time.Time       `json:"startedAt"`
-	BridgeMode    string          `json:"bridgeMode"`
-	Mode          string          `json:"mode"`
-	Snapshot      StoreSnapshot   `json:"snapshot"`
-	SymbolCount   int             `json:"symbolCount"`
-	AccountCount  int             `json:"accountCount"`
-	PositionCount int             `json:"positionCount"`
-	LastSignals   []model.Signal  `json:"lastSignals"`
-	LastCommands  []model.Command `json:"lastCommands"`
-	Metrics       Metrics         `json:"metrics"`
-	Config        ConfigSnapshot  `json:"config"`
-	LatestTickAt  time.Time       `json:"latestTickAt"`
-	LatestSymbol  string          `json:"latestSymbol"`
+	Time          time.Time         `json:"time"`
+	StartedAt     time.Time         `json:"startedAt"`
+	BridgeMode    string            `json:"bridgeMode"`
+	Mode          string            `json:"mode"`
+	Snapshot      StoreSnapshot     `json:"snapshot"`
+	SymbolCount   int               `json:"symbolCount"`
+	AccountCount  int               `json:"accountCount"`
+	PositionCount int               `json:"positionCount"`
+	LastSignals   []model.Signal    `json:"lastSignals"`
+	LastCommands  []model.Command   `json:"lastCommands"`
+	Metrics       Metrics           `json:"metrics"`
+	Config        ConfigSnapshot    `json:"config"`
+	LatestTickAt  time.Time         `json:"latestTickAt"`
+	LatestSymbol  string            `json:"latestSymbol"`
+	GridStates    []model.GridState `json:"gridStates"`
+	GuardLevel    model.GuardLevel  `json:"guardLevel"`
 }
 
 // Metrics tracks engine processing counters.
@@ -71,14 +85,17 @@ type ConfigSnapshot struct {
 
 // New creates a new Engine from configuration and bridge.
 func New(cfg *config.Config, br *bridge.Bridge) *Engine {
-	return &Engine{
-		store:   NewStore(),
-		bridge:  br,
-		signals: make(chan model.Signal, 1024),
+	logger := zap.NewNop()
+
+	e := &Engine{
+		store:    NewStore(),
+		bridge:   br,
+		signals:  make(chan model.Signal, 1024),
 		commands: make(chan model.Command, 1024),
-		lastSig: make(map[string]model.Signal),
-		started: time.Now(),
-		logger:  zap.NewNop(),
+		lastSig:  make(map[string]model.Signal),
+		started:  time.Now(),
+		logger:   logger,
+		fullCfg:  cfg,
 		cfg: ConfigSnapshot{
 			BridgeName:       cfg.Bridge.SharedMemoryName,
 			TickCapacity:     cfg.Bridge.TickCapacity,
@@ -88,12 +105,37 @@ func New(cfg *config.Config, br *bridge.Bridge) *Engine {
 			DefaultPreset:    cfg.Engine.DefaultPreset,
 		},
 	}
+
+	// Initialize Phase 2 modules
+	e.guard = NewGuard(cfg.Risk.DrawdownLevels, logger)
+	e.gridMgr = NewGridManager(logger)
+	e.cascadeMgr = NewCascadeManager(logger)
+	e.smartClose = NewSmartClose(
+		cfg.Hedge.SmartClosePnl,
+		10.0, // min drawdown % to activate smart close
+		50.0, // max loss $ emergency close
+		logger,
+	)
+	e.detector = NewMarketDetector(
+		cfg.Engine.MarketDetector.ATRPeriod,
+		cfg.Engine.MarketDetector.ADXPeriod,
+		cfg.Engine.MarketDetector.RangeADX,
+		cfg.Engine.MarketDetector.TrendADX,
+	)
+	e.consolFilter = NewConsolidationFilter(e.detector)
+	e.scoring = NewScoring()
+
+	return e
 }
 
-// SetLogger sets the structured logger for the engine.
+// SetLogger sets the structured logger for the engine and all sub-modules.
 func (e *Engine) SetLogger(logger *zap.Logger) {
 	if logger != nil {
 		e.logger = logger
+		e.guard.logger = logger
+		e.gridMgr.logger = logger
+		e.cascadeMgr.logger = logger
+		e.smartClose.logger = logger
 	}
 }
 
@@ -122,6 +164,16 @@ func (e *Engine) PushCommand(cmd model.Command) {
 	}
 }
 
+// StatusJSON returns the engine status as JSON bytes (for API).
+func (e *Engine) StatusJSON() ([]byte, error) {
+	return json.Marshal(e.Status())
+}
+
+// GridStatesJSON returns grid states as JSON bytes.
+func (e *Engine) GridStatesJSON() ([]byte, error) {
+	return json.Marshal(e.gridMgr.AllStates())
+}
+
 // Status returns the current engine status.
 func (e *Engine) Status() Status {
 	snapshot := e.store.Snapshot()
@@ -137,7 +189,9 @@ func (e *Engine) Status() Status {
 
 	e.mu.Lock()
 	mode := "RUNNING"
-	if e.paused {
+	if e.frozen {
+		mode = "FROZEN"
+	} else if e.paused {
 		mode = "PAUSED"
 	}
 	metrics := e.metrics
@@ -147,6 +201,7 @@ func (e *Engine) Status() Status {
 	}
 	cmds := make([]model.Command, len(e.recentCmds))
 	copy(cmds, e.recentCmds)
+	guardLevel := e.guard.prev
 	e.mu.Unlock()
 
 	positionCount := 0
@@ -171,6 +226,8 @@ func (e *Engine) Status() Status {
 		Config:        e.cfg,
 		LatestTickAt:  latestTickAt,
 		LatestSymbol:  latestSymbol,
+		GridStates:    e.gridMgr.AllStates(),
+		GuardLevel:    guardLevel,
 	}
 }
 
@@ -211,6 +268,7 @@ func (e *Engine) handleCommand(cmd model.Command) {
 	case model.CommandResume:
 		e.mu.Lock()
 		e.paused = false
+		e.frozen = false
 		e.mu.Unlock()
 		e.logger.Info("engine_resumed")
 	case model.CommandHedgeAll:
@@ -219,6 +277,11 @@ func (e *Engine) handleCommand(cmd model.Command) {
 	case model.CommandCloseAll:
 		cmds := e.buildCloseAllCommands(cmd.AccountID, "CLOSE_ALL", time.Now())
 		e.sendAll(cmds)
+	case model.CommandFreeze:
+		e.mu.Lock()
+		e.frozen = true
+		e.mu.Unlock()
+		e.logger.Warn("engine_frozen")
 	default:
 		e.bridge.SendCommand(cmd)
 	}
@@ -237,7 +300,7 @@ func (e *Engine) handleCommand(cmd model.Command) {
 func (e *Engine) step() {
 	now := time.Now()
 
-	// Read ticks from bridge
+	// ── Read data from bridge ──
 	ticks := e.bridge.ReadTicks(1024)
 	if len(ticks) > 0 {
 		e.store.AddTicks(ticks)
@@ -247,7 +310,6 @@ func (e *Engine) step() {
 		e.mu.Unlock()
 	}
 
-	// Read positions from bridge
 	positions := e.bridge.ReadPositions(1024)
 	if len(positions) > 0 {
 		e.store.UpdatePositions(positions)
@@ -256,16 +318,144 @@ func (e *Engine) step() {
 		e.mu.Unlock()
 	}
 
-	// Read accounts from bridge
 	accounts := e.bridge.ReadAccounts(1024)
 	if len(accounts) > 0 {
 		e.store.UpdateAccounts(accounts)
 	}
 
-	// Send heartbeat
 	e.bridge.Heartbeat(now)
 
-	// Phase 2+ will add: grid, cascade, hedge, risk, stealth processing here
+	// ── Skip trading logic if paused or frozen ──
+	e.mu.Lock()
+	paused := e.paused
+	frozen := e.frozen
+	e.mu.Unlock()
+	if paused || frozen {
+		return
+	}
+
+	// ── Phase 2: Trading logic ──
+	e.processTradingLogic()
+}
+
+// processTradingLogic runs grid, cascade, guard, and smart close.
+func (e *Engine) processTradingLogic() {
+	snapshot := e.store.Snapshot()
+	if len(snapshot.Accounts) == 0 {
+		return
+	}
+
+	preset := e.findPreset(e.cfg.DefaultPreset)
+	if preset == nil {
+		return
+	}
+
+	for _, acct := range snapshot.Accounts {
+		// Update drawdown
+		acct = UpdateDrawdown(acct)
+		e.store.SetAccount(acct)
+
+		// Evaluate guard level
+		guard := e.guard.Evaluate(acct)
+
+		// Handle forced actions
+		if guard.ForceClose {
+			cmds := e.buildCloseAllCommands(acct.AccountID, "GUARD_BLACK", time.Now())
+			e.sendAll(cmds)
+			e.mu.Lock()
+			e.frozen = true
+			e.mu.Unlock()
+			e.logger.Error("guard_black_close_all",
+				zap.String("account", acct.AccountID),
+				zap.Float64("drawdown", acct.DrawdownPct),
+			)
+			continue
+		}
+		if guard.ForceHedge {
+			cmds := e.buildHedgeAllCommands(acct.AccountID)
+			e.sendAll(cmds)
+			continue
+		}
+
+		acctPositions := filterAccountPositions(snapshot.Positions, acct.AccountID)
+
+		// Smart close evaluation
+		scResult := e.smartClose.Evaluate(acctPositions, acct)
+		if scResult.ShouldClose {
+			e.sendAll(scResult.Commands)
+			continue
+		}
+
+		// Process each symbol
+		for _, sym := range snapshot.Symbols {
+			if !sym.HasTick || sym.Bid <= 0 || sym.Ask <= 0 || len(sym.Symbol) < 3 {
+				continue
+			}
+
+			symbolPositions := filterSymbolPositions(acctPositions, sym.Symbol)
+
+			// Consolidation filter
+			ticks := e.store.GetTicks(sym.Symbol)
+			consol := e.consolFilter.Check(sym.Symbol, ticks)
+			if consol.IsConsolidating {
+				continue
+			}
+
+			// Determine grid direction from scoring
+			direction := GridBothDir
+			if len(ticks) > 50 {
+				score := e.scoring.Score(sym.Symbol, ticks)
+				if score.Direction == model.SideBuy {
+					direction = GridBuyOnly
+				} else if score.Direction == model.SideSell {
+					direction = GridSellOnly
+				}
+			}
+
+			// Grid evaluation
+			grid := e.gridMgr.GetOrCreate(sym.Symbol, acct.AccountID, *preset)
+			gridCmds := grid.Evaluate(sym.Bid, sym.Ask, symbolPositions, guard, direction, 1000)
+			e.sendAll(gridCmds)
+
+			// Cascade evaluation
+			if guard.AllowCascade && preset.CascadeLevels > 0 {
+				cascade := e.cascadeMgr.GetOrCreate(sym.Symbol, acct.AccountID, preset.CascadeLevels)
+				if grid.State().AnchorPrice > 0 {
+					if len(cascade.Levels()) > 0 && cascade.Levels()[0].Price == 0 {
+						side := model.SideBuy
+						if direction == GridSellOnly {
+							side = model.SideSell
+						}
+						cascade.Initialize(grid.State().AnchorPrice, preset.GridSpacing, side)
+					}
+
+					cascadeParams := GridCascadeParams{
+						BaseLot:       preset.BaseLot,
+						LotMultiplier: preset.LotMultiplier,
+						Direction:     model.SideBuy,
+					}
+					if direction == GridSellOnly {
+						cascadeParams.Direction = model.SideSell
+					}
+					cascadeCmds := cascade.Evaluate(sym.Bid, sym.Ask, symbolPositions, guard, cascadeParams)
+					e.sendAll(cascadeCmds)
+				}
+			}
+		}
+	}
+}
+
+// findPreset returns the preset config by name.
+func (e *Engine) findPreset(name string) *config.PresetConfig {
+	for i := range e.fullCfg.Engine.Presets {
+		if e.fullCfg.Engine.Presets[i].Name == name {
+			return &e.fullCfg.Engine.Presets[i]
+		}
+	}
+	if len(e.fullCfg.Engine.Presets) > 0 {
+		return &e.fullCfg.Engine.Presets[0]
+	}
+	return nil
 }
 
 // buildHedgeAllCommands creates hedge commands for all open positions.
@@ -335,4 +525,26 @@ func (e *Engine) sendAll(cmds []model.Command) {
 		}
 		e.mu.Unlock()
 	}
+}
+
+// filterAccountPositions returns positions for a specific account.
+func filterAccountPositions(positions []model.Position, accountID string) []model.Position {
+	var out []model.Position
+	for _, pos := range positions {
+		if pos.AccountID == accountID && !pos.Pending {
+			out = append(out, pos)
+		}
+	}
+	return out
+}
+
+// filterSymbolPositions returns positions for a specific symbol.
+func filterSymbolPositions(positions []model.Position, symbol string) []model.Position {
+	var out []model.Position
+	for _, pos := range positions {
+		if pos.Symbol == symbol {
+			out = append(out, pos)
+		}
+	}
+	return out
 }
